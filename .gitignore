@@ -9,3 +9,8 @@ env/
 .vscode/
 .idea/
 settings.json
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec

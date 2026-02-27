@@ -6,9 +6,48 @@ for dynamic resolution, screen mode, FPS, and VSync settings.
 
 import json
 import os
+import sys
 
-# Path to settings file (next to the running script)
-_CONFIG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def _get_base_dir():
+    """
+    Return the directory where the .exe (or main.py) lives.
+
+    When running from source:
+        <project_root>/arena_shooter/config.py  →  base = <project_root>
+
+    When frozen with PyInstaller --onefile:
+        sys.executable = C:/.../NeonArena.exe   →  base = C:/...
+        sys._MEIPASS   = %TEMP%/_MEIxxxxxx      (temp extraction, NOT writable)
+
+    We use the *executable* directory for settings.json so user
+    preferences persist across runs (the temp dir is deleted on exit).
+    """
+    if getattr(sys, "frozen", False):
+        # Running as a PyInstaller bundle
+        return os.path.dirname(sys.executable)
+    else:
+        # Running from source — go up one level from arena_shooter/
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def resource_path(relative_path):
+    """
+    Resolve path to a *bundled read-only* data file.
+
+    In --onefile mode PyInstaller extracts data files into a temp
+    folder referenced by sys._MEIPASS. Use this for assets that are
+    packed into the exe and should NOT be written to.
+    """
+    if getattr(sys, "frozen", False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, relative_path)
+
+
+# Path to settings file (next to the .exe or project root)
+_CONFIG_DIR = _get_base_dir()
 CONFIG_PATH = os.path.join(_CONFIG_DIR, "settings.json")
 
 # ── Available options ────────────────────────────────────

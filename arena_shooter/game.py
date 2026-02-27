@@ -15,7 +15,7 @@ from .settings import (
     NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_YELLOW,
     UPGRADES,
 )
-from .config import Config
+from .config import Config, resource_path
 from .player import Player
 from .particles import ParticleSystem
 from .camera import Camera
@@ -50,6 +50,15 @@ class Game:
         self._apply_display_mode()
 
         pygame.display.set_caption(TITLE)
+
+        # ── Window / Taskbar Icon ────────────────────────
+        try:
+            icon_path = resource_path("neonarena.ico")
+            if os.path.exists(icon_path):
+                icon_surface = pygame.image.load(icon_path)
+                pygame.display.set_icon(icon_surface)
+        except Exception:
+            pass  # No icon available — not fatal
         self.clock = pygame.time.Clock()
         self.running = True
         self.state = GameState.MENU
