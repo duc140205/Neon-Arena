@@ -11,8 +11,11 @@ from .settings import (
     SHOOTER_SPEED, SHOOTER_HP, SHOOTER_SIZE, SHOOTER_DAMAGE, SHOOTER_XP, SHOOTER_COLOR,
     SHOOTER_FIRE_RATE, SHOOTER_BULLET_SPEED, SHOOTER_PREFERRED_DIST,
     TANK_SPEED, TANK_HP, TANK_SIZE, TANK_DAMAGE, TANK_XP, TANK_COLOR,
-    NEON_RED, NEON_ORANGE, NEON_PURPLE, WHITE,
+    NEON_RED, NEON_ORANGE, NEON_PURPLE, NEON_CYAN, WHITE,
     ARENA_WIDTH, ARENA_HEIGHT,
+    CHASER_BURST_CHANCE, CHASER_BURST_SPEED_MULT, CHASER_BURST_DURATION,
+    SHOOTER_FAN_BULLET_COUNT, SHOOTER_FAN_SPREAD,
+    TANK_SHIELD_COOLDOWN, TANK_SHIELD_DURATION, TANK_SHIELD_REDUCTION,
 )
 from .projectiles import EnemyBullet
 
@@ -105,18 +108,22 @@ class Enemy(pygame.sprite.Sprite):
 
 
 class Chaser(Enemy):
-    """Rushes directly toward the player."""
+    """Rushes directly toward the player. Can burst-dash."""
 
-    def __init__(self, x, y, hp_multiplier=1.0, speed_multiplier=1.0):
+    def __init__(self, x, y, hp_multiplier=1.0, speed_multiplier=1.0, damage_multiplier=1.0):
         super().__init__(
             x, y,
             speed=CHASER_SPEED * speed_multiplier,
             hp=int(CHASER_HP * hp_multiplier),
             size=CHASER_SIZE,
-            damage=CHASER_DAMAGE,
+            damage=int(CHASER_DAMAGE * damage_multiplier),
             xp=CHASER_XP,
             color=CHASER_COLOR,
         )
+        # Burst speed ability
+        self.burst_timer = 0.0
+        self.is_bursting = False
+        self.base_speed = self.speed
 
     def update(self, dt, player_x, player_y, enemy_bullets=None):
         dx = player_x - self.pos_x
@@ -125,22 +132,39 @@ class Chaser(Enemy):
         if dist > 0:
             dx /= dist
             dy /= dist
+
+        # Burst speed logic
+        if self.is_bursting:
+            self.burst_timer -= dt
+            if self.burst_timer <= 0:
+                self.is_bursting = False
+                self.speed = self.base_speed
+        else:
+            # Random chance to burst (only when close enough)
+            if dist < 400 and random.random() < CHASER_BURST_CHANCE:
+                self.is_bursting = True
+                self.burst_timer = CHASER_BURST_DURATION
+                self.speed = self.base_speed * CHASER_BURST_SPEED_MULT
+
         wobble = math.sin(pygame.time.get_ticks() * 0.005 + self.wobble_offset) * 0.3
         perp_x = -dy * wobble
         perp_y = dx * wobble
-        self.pos_x += (dx + perp_x) * self.speed * dt
-        self.pos_y += (dy + perp_y) * self.speed * dt
+
+        move_speed = self.speed
+        self.pos_x += (dx + perp_x) * move_speed * dt
+        self.pos_y += (dy + perp_y) * move_speed * dt
         super().update(dt, player_x, player_y)
 
     def _draw_shape(self, surface, sx, sy, color, camera):
-        """Draw as a triangle pointing toward last movement direction."""
+        """Draw as a triangle. Flashes white during burst."""
         r = camera.s(self.radius)
+        draw_color = WHITE if self.is_bursting else color
         points = [
             (sx, sy - r),
             (sx + r, sy + r),
             (sx - r, sy + r),
         ]
-        pygame.draw.polygon(surface, color, points, max(1, camera.s(2)))
+        pygame.draw.polygon(surface, draw_color, points, max(1, camera.s(2)))
 
         # Inner fill
         inset = camera.s(3)
@@ -152,26 +176,30 @@ class Chaser(Enemy):
         pad = r + camera.s(2)
         inner_surf = pygame.Surface((pad * 2, pad * 2), pygame.SRCALPHA)
         shifted = [(p[0] - sx + pad, p[1] - sy + pad) for p in inner_points]
-        pygame.draw.polygon(inner_surf, (*color, 60), shifted)
+        alpha = 100 if self.is_bursting else 60
+        pygame.draw.polygon(inner_surf, (*color, alpha), shifted)
         surface.blit(inner_surf, (sx - pad, sy - pad))
 
 
 class Shooter(Enemy):
-    """Keeps distance from the player and fires projectiles."""
+    """Keeps distance from the player and fires projectiles. Can fan-shot."""
 
-    def __init__(self, x, y, hp_multiplier=1.0, speed_multiplier=1.0):
+    def __init__(self, x, y, hp_multiplier=1.0, speed_multiplier=1.0,
+                 damage_multiplier=1.0, wave_num=1):
         super().__init__(
             x, y,
             speed=SHOOTER_SPEED * speed_multiplier,
             hp=int(SHOOTER_HP * hp_multiplier),
             size=SHOOTER_SIZE,
-            damage=SHOOTER_DAMAGE,
+            damage=int(SHOOTER_DAMAGE * damage_multiplier),
             xp=SHOOTER_XP,
             color=SHOOTER_COLOR,
         )
         self.fire_timer = random.uniform(0, SHOOTER_FIRE_RATE)
         self.fire_rate = SHOOTER_FIRE_RATE
         self.preferred_dist = SHOOTER_PREFERRED_DIST
+        # Fan shot unlocks based on wave number
+        self.is_elite = wave_num >= 4
 
     def update(self, dt, player_x, player_y, enemy_bullets=None):
         dx = player_x - self.pos_x
@@ -198,16 +226,30 @@ class Shooter(Enemy):
         if self.fire_timer <= 0 and enemy_bullets is not None:
             self.fire_timer = self.fire_rate
             angle = math.atan2(dy, dx)
-            bullet = EnemyBullet(
-                self.pos_x, self.pos_y, angle,
-                SHOOTER_BULLET_SPEED, self.damage,
-            )
-            enemy_bullets.add(bullet)
+
+            if self.is_elite:
+                # Fan shot: fire multiple bullets in a spread
+                count = SHOOTER_FAN_BULLET_COUNT
+                spread = SHOOTER_FAN_SPREAD
+                for i in range(count):
+                    offset = spread * (i / (count - 1) - 0.5) if count > 1 else 0
+                    bullet = EnemyBullet(
+                        self.pos_x, self.pos_y, angle + offset,
+                        SHOOTER_BULLET_SPEED, self.damage,
+                    )
+                    enemy_bullets.add(bullet)
+            else:
+                # Single shot
+                bullet = EnemyBullet(
+                    self.pos_x, self.pos_y, angle,
+                    SHOOTER_BULLET_SPEED, self.damage,
+                )
+                enemy_bullets.add(bullet)
 
         super().update(dt, player_x, player_y)
 
     def _draw_shape(self, surface, sx, sy, color, camera):
-        """Draw as a diamond/rhombus shape."""
+        """Draw as a diamond/rhombus shape. Elite has pulsing ring."""
         r = camera.s(self.radius)
         points = [
             (sx, sy - r),
@@ -226,17 +268,26 @@ class Shooter(Enemy):
         # Eye dot
         pygame.draw.circle(surface, color, (sx, sy), max(1, camera.s(3)))
 
+        # Elite indicator: outer pulsing ring
+        if self.is_elite:
+            pulse = int(5 * math.sin(pygame.time.get_ticks() * 0.008))
+            elite_r = r + camera.s(4) + pulse
+            elite_surf = pygame.Surface((elite_r * 2, elite_r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(elite_surf, (*NEON_ORANGE, 80),
+                               (elite_r, elite_r), elite_r, max(1, camera.s(1)))
+            surface.blit(elite_surf, (sx - elite_r, sy - elite_r))
+
 
 class Tank(Enemy):
-    """Slow, high-HP enemy that charges at the player."""
+    """Slow, high-HP enemy that charges at the player. Has shield phase."""
 
-    def __init__(self, x, y, hp_multiplier=1.0, speed_multiplier=1.0):
+    def __init__(self, x, y, hp_multiplier=1.0, speed_multiplier=1.0, damage_multiplier=1.0):
         super().__init__(
             x, y,
             speed=TANK_SPEED * speed_multiplier,
             hp=int(TANK_HP * hp_multiplier),
             size=TANK_SIZE,
-            damage=TANK_DAMAGE,
+            damage=int(TANK_DAMAGE * damage_multiplier),
             xp=TANK_XP,
             color=TANK_COLOR,
         )
@@ -246,11 +297,38 @@ class Tank(Enemy):
         self.charge_vx = 0
         self.charge_vy = 0
 
+        # Shield phase
+        self.shield_cooldown_timer = TANK_SHIELD_COOLDOWN * random.uniform(0.5, 1.0)
+        self.shield_timer = 0.0
+        self.is_shielded = False
+
+    def take_damage(self, amount, particle_system):
+        """Override: reduce damage when shielded."""
+        if self.is_shielded:
+            amount = int(amount * (1.0 - TANK_SHIELD_REDUCTION))
+            # Shield hit particles (cyan sparks)
+            particle_system.emit(self.pos_x, self.pos_y, NEON_CYAN, count=4,
+                                 speed_range=(60, 140), lifetime_range=(0.1, 0.25))
+        return super().take_damage(amount, particle_system)
+
     def update(self, dt, player_x, player_y, enemy_bullets=None):
         dx = player_x - self.pos_x
         dy = player_y - self.pos_y
         dist = math.sqrt(dx * dx + dy * dy)
 
+        # Shield phase logic
+        if self.is_shielded:
+            self.shield_timer -= dt
+            if self.shield_timer <= 0:
+                self.is_shielded = False
+                self.shield_cooldown_timer = TANK_SHIELD_COOLDOWN
+        else:
+            self.shield_cooldown_timer -= dt
+            if self.shield_cooldown_timer <= 0:
+                self.is_shielded = True
+                self.shield_timer = TANK_SHIELD_DURATION
+
+        # Movement (charge or walk)
         if self.is_charging:
             self.charge_duration -= dt
             self.pos_x += self.charge_vx * dt
@@ -276,7 +354,7 @@ class Tank(Enemy):
         super().update(dt, player_x, player_y)
 
     def _draw_shape(self, surface, sx, sy, color, camera):
-        """Draw as a hexagon."""
+        """Draw as a hexagon. Shield shown as cyan outer ring."""
         r = camera.s(self.radius)
         points = []
         for i in range(6):
@@ -299,3 +377,12 @@ class Tank(Enemy):
 
         # Inner ring
         pygame.draw.circle(surface, draw_color, (sx, sy), max(1, r // 2), max(1, camera.s(1)))
+
+        # Shield visual: pulsing cyan ring
+        if self.is_shielded:
+            pulse = int(3 * math.sin(pygame.time.get_ticks() * 0.01))
+            shield_r = r + camera.s(6) + pulse
+            shield_surf = pygame.Surface((shield_r * 2, shield_r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(shield_surf, (*NEON_CYAN, 100),
+                               (shield_r, shield_r), shield_r, max(1, camera.s(2)))
+            surface.blit(shield_surf, (sx - shield_r, sy - shield_r))

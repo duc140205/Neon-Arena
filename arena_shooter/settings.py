@@ -100,6 +100,28 @@ SPAWN_MIN_DIST = 300        # min distance from player
 BASE_XP_REQUIRED = 100
 XP_SCALE_FACTOR = 1.4       # XP required multiplier per level
 
+# ── Difficulty Scaling ──────────────────────────────────
+# Applied per player level-up on top of wave scaling
+DIFFICULTY_HP_PER_LEVEL = 0.05      # +5% enemy HP per player level
+DIFFICULTY_SPEED_PER_LEVEL = 0.02   # +2% enemy speed per player level
+DIFFICULTY_DAMAGE_PER_LEVEL = 0.03  # +3% enemy damage per player level
+
+# ── Enemy Special Skills ────────────────────────────────
+# Chaser — Burst Speed
+CHASER_BURST_CHANCE = 0.008         # chance per frame (~0.8% per tick)
+CHASER_BURST_SPEED_MULT = 3.0      # speed multiplier during burst
+CHASER_BURST_DURATION = 0.4        # seconds
+
+# Shooter — Fan Shot
+SHOOTER_FAN_WAVE_THRESHOLD = 4     # wave number to unlock fan shot
+SHOOTER_FAN_BULLET_COUNT = 3       # bullets in fan
+SHOOTER_FAN_SPREAD = 0.35          # radians total spread
+
+# Tank — Shield Phase
+TANK_SHIELD_COOLDOWN = 8.0         # seconds between shields
+TANK_SHIELD_DURATION = 3.0         # seconds shield lasts
+TANK_SHIELD_REDUCTION = 0.7        # damage reduced (70% reduction)
+
 # ── Upgrades ─────────────────────────────────────────────
 UPGRADES = {
     "fire_rate": {
@@ -143,6 +165,20 @@ UPGRADES = {
         "icon": "◇",
         "color": NEON_PURPLE,
         "max_level": 5,
+    },
+    "giant_growth": {
+        "name": "GIANT GROWTH",
+        "desc": "Size↑ HP+50 Dmg+30%",
+        "icon": "✦",
+        "color": NEON_RED,
+        "max_level": 4,
+    },
+    "multi_barrel": {
+        "name": "MULTI-BARREL",
+        "desc": "Extra barrel +1",
+        "icon": "⊕",
+        "color": NEON_BLUE,
+        "max_level": 2,
     },
 }
 

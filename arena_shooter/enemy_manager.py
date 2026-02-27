@@ -8,18 +8,22 @@ from .enemies import Chaser, Shooter, Tank
 from .settings import (
     ARENA_WIDTH, ARENA_HEIGHT, SPAWN_MARGIN, SPAWN_MIN_DIST,
     WAVE_BREAK_TIME, SCREEN_WIDTH, SCREEN_HEIGHT,
+    DIFFICULTY_HP_PER_LEVEL, DIFFICULTY_SPEED_PER_LEVEL,
+    DIFFICULTY_DAMAGE_PER_LEVEL,
 )
 
 
 class WaveDefinition:
     """Defines a single wave's enemy composition."""
 
-    def __init__(self, chasers=0, shooters=0, tanks=0, hp_mult=1.0, speed_mult=1.0):
+    def __init__(self, chasers=0, shooters=0, tanks=0,
+                 hp_mult=1.0, speed_mult=1.0, damage_mult=1.0):
         self.chasers = chasers
         self.shooters = shooters
         self.tanks = tanks
         self.hp_mult = hp_mult
         self.speed_mult = speed_mult
+        self.damage_mult = damage_mult
 
     @property
     def total(self):
@@ -37,6 +41,18 @@ class EnemyManager:
         self.total_enemies_killed = 0
         self.wave_announcement_timer = 0.0
 
+        # Difficulty factor increases with player level
+        self.difficulty_factor = 1.0
+
+    def set_difficulty(self, player_level):
+        """Update difficulty based on player level.
+
+        Called by game.py whenever the player levels up.
+        Scales enemy HP, speed, and damage multiplicatively.
+        """
+        lvl = player_level - 1  # level 1 = no bonus
+        self.difficulty_factor = 1.0 + lvl * 0.05  # ~5% total per level
+
     def _generate_wave(self, wave_num):
         """Generate a wave definition based on wave number."""
         # Base counts that scale with wave number
@@ -49,11 +65,19 @@ class EnemyManager:
         shooters = min(shooters, 10)
         tanks = min(tanks, 5)
 
-        # Difficulty scaling
-        hp_mult = 1.0 + (wave_num - 1) * 0.1   # +10% HP per wave
-        speed_mult = 1.0 + (wave_num - 1) * 0.03  # +3% speed per wave
+        # Wave-based scaling
+        wave_hp = 1.0 + (wave_num - 1) * 0.1       # +10% HP per wave
+        wave_speed = 1.0 + (wave_num - 1) * 0.03    # +3% speed per wave
+        wave_damage = 1.0 + (wave_num - 1) * 0.05   # +5% damage per wave
 
-        return WaveDefinition(chasers, shooters, tanks, hp_mult, speed_mult)
+        # Apply player-level difficulty on top
+        df = self.difficulty_factor
+        hp_mult = wave_hp * (1.0 + (df - 1.0) * DIFFICULTY_HP_PER_LEVEL / 0.05)
+        speed_mult = wave_speed * (1.0 + (df - 1.0) * DIFFICULTY_SPEED_PER_LEVEL / 0.05)
+        damage_mult = wave_damage * (1.0 + (df - 1.0) * DIFFICULTY_DAMAGE_PER_LEVEL / 0.05)
+
+        return WaveDefinition(chasers, shooters, tanks,
+                              hp_mult, speed_mult, damage_mult)
 
     def _get_spawn_pos(self, player_x, player_y, camera_rect):
         """Get a valid spawn position outside the camera view but inside arena."""
@@ -124,17 +148,20 @@ class EnemyManager:
 
         for _ in range(wave_def.chasers):
             x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
-            enemy = Chaser(x, y, wave_def.hp_mult, wave_def.speed_mult)
+            enemy = Chaser(x, y, wave_def.hp_mult, wave_def.speed_mult,
+                           wave_def.damage_mult)
             enemy_group.add(enemy)
 
         for _ in range(wave_def.shooters):
             x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
-            enemy = Shooter(x, y, wave_def.hp_mult, wave_def.speed_mult)
+            enemy = Shooter(x, y, wave_def.hp_mult, wave_def.speed_mult,
+                            wave_def.damage_mult, wave_num=self.wave)
             enemy_group.add(enemy)
 
         for _ in range(wave_def.tanks):
             x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
-            enemy = Tank(x, y, wave_def.hp_mult, wave_def.speed_mult)
+            enemy = Tank(x, y, wave_def.hp_mult, wave_def.speed_mult,
+                         wave_def.damage_mult)
             enemy_group.add(enemy)
 
     def on_enemy_killed(self):
@@ -149,3 +176,4 @@ class EnemyManager:
             "total_killed": self.total_enemies_killed,
             "announcing": self.wave_announcement_timer > 0,
         }
+

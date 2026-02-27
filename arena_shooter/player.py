@@ -60,6 +60,7 @@ class Player(pygame.sprite.Sprite):
         self.upgrade_levels = {
             "fire_rate": 0, "bullet_speed": 0, "max_hp": 0,
             "damage": 0, "move_speed": 0, "dash_cooldown": 0,
+            "giant_growth": 0, "multi_barrel": 0,
         }
 
         # Invincibility
@@ -91,6 +92,11 @@ class Player(pygame.sprite.Sprite):
             return True
         return False
 
+    @property
+    def barrel_count(self):
+        """Number of bullets fired per shot (1 + multi_barrel level)."""
+        return 1 + self.upgrade_levels.get("multi_barrel", 0)
+
     def apply_upgrade(self, upgrade_key):
         self.upgrade_levels[upgrade_key] += 1
         if upgrade_key == "fire_rate":
@@ -106,6 +112,17 @@ class Player(pygame.sprite.Sprite):
             self.speed *= 1.10
         elif upgrade_key == "dash_cooldown":
             self.dash_cooldown *= 0.85
+        elif upgrade_key == "giant_growth":
+            # Bigger target, but tankier and harder-hitting
+            self.radius += 5
+            self.max_hp += 50
+            self.hp = min(self.max_hp, self.hp + 50)
+            self.bullet_damage *= 1.30
+            # Rebuild sprite rect for new size
+            self.image = pygame.Surface(
+                (self.radius * 2 + 4, self.radius * 2 + 4), pygame.SRCALPHA)
+            self.rect = self.image.get_rect(center=(int(self.pos_x), int(self.pos_y)))
+        # multi_barrel: handled by barrel_count property (no stat change needed)
 
     def update(self, dt, mouse_screen_pos, camera):
         self.fire_timer = max(0, self.fire_timer - dt)
@@ -166,16 +183,30 @@ class Player(pygame.sprite.Sprite):
         if mouse_buttons[0] and self.fire_timer <= 0 and not self.is_dashing:
             self.fire_timer = self.fire_rate
             gun_dist = self.radius + 8
-            bx = self.pos_x + math.cos(self.aim_angle) * gun_dist
-            by = self.pos_y + math.sin(self.aim_angle) * gun_dist
-            bullet = PlayerBullet(bx, by, self.aim_angle,
-                                  self.bullet_speed, self.bullet_damage,
-                                  size=self.bullet_size)
-            bullet_group.add(bullet)
-            self.particles.emit(bx, by, NEON_CYAN, count=4,
-                                speed_range=(50, 150), lifetime_range=(0.1, 0.2),
-                                size_range=(2, 4),
-                                angle_range=(self.aim_angle - 0.3, self.aim_angle + 0.3))
+            count = self.barrel_count
+
+            if count == 1:
+                # Single barrel — original behavior
+                angles = [self.aim_angle]
+            else:
+                # Multi-barrel spread: evenly spaced around center
+                spread = 0.15 * (count - 1)  # total spread in radians
+                angles = [
+                    self.aim_angle + spread * (i / (count - 1) - 0.5)
+                    for i in range(count)
+                ]
+
+            for angle in angles:
+                bx = self.pos_x + math.cos(angle) * gun_dist
+                by = self.pos_y + math.sin(angle) * gun_dist
+                bullet = PlayerBullet(bx, by, angle,
+                                      self.bullet_speed, self.bullet_damage,
+                                      size=self.bullet_size)
+                bullet_group.add(bullet)
+                self.particles.emit(bx, by, NEON_CYAN, count=3,
+                                    speed_range=(50, 150), lifetime_range=(0.1, 0.2),
+                                    size_range=(2, 4),
+                                    angle_range=(angle - 0.3, angle + 0.3))
             return True
         return False
 

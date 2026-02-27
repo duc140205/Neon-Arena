@@ -474,6 +474,8 @@ class Game:
                             self.pending_levelups += 1
                             self._generate_upgrade_options()
                             self.state = GameState.UPGRADE
+                            # Scale difficulty with player level
+                            self.enemy_manager.set_difficulty(self.player.level)
                     break
 
         if not self.player.is_dashing:
