@@ -58,6 +58,7 @@ HIDDEN_IMPORTS = [
     "arena_shooter.projectiles",
     "arena_shooter.ui",
     "arena_shooter.settings_menu",
+    "arena_shooter.obstacles",
 ]
 
 

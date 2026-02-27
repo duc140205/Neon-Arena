@@ -12,8 +12,8 @@ FPS = 60
 TITLE = "NEON ARENA // Cyberpunk Shooter"
 
 # ── Arena ────────────────────────────────────────────────
-ARENA_WIDTH = 2400
-ARENA_HEIGHT = 2400
+ARENA_WIDTH = 4000
+ARENA_HEIGHT = 4000
 GRID_SIZE = 80  # background grid cell size
 
 # ── Cyberpunk Color Palette ──────────────────────────────
@@ -47,6 +47,31 @@ HP_BAR      = (255, 40, 80)
 HP_BAR_BG   = (60, 20, 30)
 XP_BAR      = (0, 220, 255)
 XP_BAR_BG   = (20, 40, 60)
+NEON_WHITE  = (220, 230, 255)
+
+# ── Obstacles ────────────────────────────────────────────
+OBSTACLE_COUNT = 25               # number of obstacles in the arena
+OBSTACLE_MIN_SIZE = 40            # min width/height
+OBSTACLE_MAX_SIZE = 120           # max width/height
+OBSTACLE_COLOR = (30, 40, 80)     # dark neon fill
+OBSTACLE_BORDER_COLOR = NEON_BLUE # neon border
+OBSTACLE_SAFE_RADIUS = 300        # no obstacles near arena center (spawn)
+
+# ── Power-Ups ────────────────────────────────────────────
+POWERUP_SPAWN_INTERVAL = 12.0     # seconds between spawns
+POWERUP_MAX_ACTIVE = 3            # max powerups in arena at once
+POWERUP_RADIUS = 14               # pickup radius
+POWERUP_LIFETIME = 15.0           # seconds before despawn
+POWERUP_TYPES = {
+    "health": {"name": "REPAIR", "color": NEON_GREEN, "icon": "+", "weight": 40},
+    "shield": {"name": "SHIELD", "color": NEON_CYAN, "icon": "O", "weight": 30},
+    "double_damage": {"name": "2x DMG", "color": NEON_YELLOW, "icon": "!", "weight": 20},
+    "speed_boost": {"name": "SPEED", "color": NEON_MAGENTA, "icon": ">", "weight": 10},
+}
+SHIELD_DURATION = 5.0             # seconds
+DOUBLE_DAMAGE_DURATION = 6.0      # seconds
+SPEED_BOOST_DURATION = 5.0        # seconds
+SPEED_BOOST_MULT = 1.5
 
 # ── Player Settings ─────────────────────────────────────
 PLAYER_SPEED = 300          # pixels per second
@@ -62,6 +87,16 @@ DASH_SPEED = 900
 DASH_DURATION = 0.15        # seconds
 DASH_COOLDOWN = 1.0         # seconds
 DASH_PARTICLES = 15
+
+# Dash upgrade constants
+GHOST_TRAIL_DAMAGE = 15           # damage per tick from ghost trail
+GHOST_TRAIL_INTERVAL = 0.03       # seconds between trail spawns
+GHOST_TRAIL_LIFETIME = 0.8        # seconds trail lingers
+GHOST_TRAIL_RADIUS = 18           # radius of each fire zone
+SHOCKWAVE_RADIUS = 150            # radius of end-of-dash blast
+SHOCKWAVE_PUSHBACK = 400          # push speed on enemies
+REFLEX_FIRE_RATE_MULT = 0.5       # 50% faster fire rate
+REFLEX_DURATION = 3.0             # seconds of boosted fire rate
 
 # ── Enemy Settings ───────────────────────────────────────
 # Chaser
@@ -179,6 +214,27 @@ UPGRADES = {
         "icon": "⊕",
         "color": NEON_BLUE,
         "max_level": 2,
+    },
+    "ghost_dash": {
+        "name": "GHOST DASH",
+        "desc": "Leave fire trail",
+        "icon": "🔥",
+        "color": NEON_ORANGE,
+        "max_level": 3,
+    },
+    "dash_shockwave": {
+        "name": "SHOCKWAVE",
+        "desc": "Blast at dash end",
+        "icon": "◎",
+        "color": NEON_MAGENTA,
+        "max_level": 3,
+    },
+    "reflex_dash": {
+        "name": "REFLEX DASH",
+        "desc": "Dash thru bullet=fast",
+        "icon": "⟡",
+        "color": NEON_WHITE,
+        "max_level": 3,
     },
 }
 

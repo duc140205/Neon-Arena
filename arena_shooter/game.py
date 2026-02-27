@@ -12,9 +12,13 @@ from .settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT, FPS, TITLE,
     ARENA_WIDTH, ARENA_HEIGHT, GRID_SIZE,
     BLACK, DARK_BG, GRID_COLOR,
-    NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_YELLOW,
+    NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_YELLOW, NEON_ORANGE,
     UPGRADES,
+    SHOCKWAVE_RADIUS, SHOCKWAVE_PUSHBACK,
+    REFLEX_DURATION,
+    SPEED_BOOST_MULT,
 )
+from .obstacles import generate_obstacles, PowerUpManager
 from .config import Config, resource_path
 from .player import Player
 from .particles import ParticleSystem
@@ -81,6 +85,11 @@ class Game:
         self.enemies = pygame.sprite.Group()
         self.player_bullets = pygame.sprite.Group()
         self.enemy_bullets = pygame.sprite.Group()
+
+        # World objects
+        self.obstacles = []
+        self.powerup_manager = None
+        self.ghost_trails = []  # [(x, y, lifetime, damage, radius)]
 
         # Upgrade state
         self.upgrade_options = []
@@ -272,6 +281,9 @@ class Game:
         self.player_bullets.empty()
         self.enemy_bullets.empty()
         self.player = Player(ARENA_WIDTH / 2, ARENA_HEIGHT / 2, self.particles)
+        self.obstacles = generate_obstacles()
+        self.powerup_manager = PowerUpManager(self.obstacles)
+        self.ghost_trails = []
         self.upgrade_options = []
         self.pending_levelups = 0
         self.state = GameState.PLAYING
@@ -428,8 +440,18 @@ class Game:
         mouse_pos = pygame.mouse.get_pos()
 
         self.player.update(dt, mouse_pos, self.camera)
+
+        # Speed boost powerup
+        saved_speed = self.player.speed
+        if self.player.speed_boost_timer > 0:
+            self.player.speed = saved_speed * SPEED_BOOST_MULT
+
         if self.player.try_shoot(self.player_bullets):
             self._play_sound("shoot")
+
+        # Restore speed after shooting calc (it's used live during update)
+        if self.player.speed_boost_timer > 0:
+            self.player.speed = saved_speed
 
         self.camera.update(self.player.pos_x, self.player.pos_y, dt)
 
@@ -446,6 +468,118 @@ class Game:
             bullet.update(dt)
         for bullet in self.enemy_bullets:
             bullet.update(dt)
+
+        # ── Obstacle collision (player) ──
+        for obs in self.obstacles:
+            px, py = obs.push_circle_out(
+                self.player.pos_x, self.player.pos_y, self.player.radius)
+            self.player.pos_x = px
+            self.player.pos_y = py
+
+        # ── Obstacle collision (enemies) ──
+        for enemy in self.enemies:
+            for obs in self.obstacles:
+                ex, ey = obs.push_circle_out(enemy.pos_x, enemy.pos_y, enemy.radius)
+                enemy.pos_x = ex
+                enemy.pos_y = ey
+
+        # ── Obstacle collision (bullets) ──
+        for bullet in list(self.player_bullets):
+            for obs in self.obstacles:
+                if obs.collides_circle(bullet.pos_x, bullet.pos_y, bullet.radius):
+                    bullet.kill()
+                    break
+        for bullet in list(self.enemy_bullets):
+            for obs in self.obstacles:
+                if obs.collides_circle(bullet.pos_x, bullet.pos_y, bullet.radius):
+                    bullet.kill()
+                    break
+
+        # ── Power-ups ──
+        if self.powerup_manager:
+            collected = self.powerup_manager.update(
+                dt, self.player.pos_x, self.player.pos_y, self.player.radius)
+            for pu_type in collected:
+                self.player.apply_powerup(pu_type)
+                self._play_sound("levelup")
+
+        # ── Ghost Trail damage ──
+        # Merge player's trail positions into game's active trails
+        if self.player.ghost_trail_positions:
+            self.ghost_trails.extend(self.player.ghost_trail_positions)
+            self.player.ghost_trail_positions.clear()
+
+        # Update and apply ghost trail damage
+        new_trails = []
+        for tx, ty, tlife, tdmg, tradius in self.ghost_trails:
+            tlife -= dt
+            if tlife > 0:
+                new_trails.append((tx, ty, tlife, tdmg, tradius))
+                # Damage enemies touching the trail
+                for enemy in list(self.enemies):
+                    edx = enemy.pos_x - tx
+                    edy = enemy.pos_y - ty
+                    edist = math.sqrt(edx * edx + edy * edy)
+                    if edist < tradius + enemy.radius:
+                        enemy.take_damage(tdmg * dt, self.particles)
+        self.ghost_trails = new_trails
+
+        # ── Dash-end effects ──
+        if self.player.dash_ended_this_frame:
+            px = self.player.dash_end_x
+            py = self.player.dash_end_y
+
+            # Shockwave
+            sw_level = self.player.upgrade_levels.get("dash_shockwave", 0)
+            if sw_level > 0:
+                radius = SHOCKWAVE_RADIUS + 30 * (sw_level - 1)
+                pushback = SHOCKWAVE_PUSHBACK * (1.0 + 0.3 * (sw_level - 1))
+                # Push enemies + damage them
+                for enemy in self.enemies:
+                    edx = enemy.pos_x - px
+                    edy = enemy.pos_y - py
+                    edist = math.sqrt(edx * edx + edy * edy)
+                    if edist < radius and edist > 0:
+                        nx = edx / edist
+                        ny = edy / edist
+                        enemy.pos_x += nx * pushback * 0.1
+                        enemy.pos_y += ny * pushback * 0.1
+                        enemy.take_damage(10 * sw_level, self.particles)
+                # Destroy nearby enemy bullets
+                for bullet in list(self.enemy_bullets):
+                    bdx = bullet.pos_x - px
+                    bdy = bullet.pos_y - py
+                    if math.sqrt(bdx * bdx + bdy * bdy) < radius:
+                        bullet.kill()
+                # Visual: particle ring
+                for i in range(24):
+                    angle = i * math.pi * 2 / 24
+                    ex = px + math.cos(angle) * radius * 0.5
+                    ey = py + math.sin(angle) * radius * 0.5
+                    self.particles.emit(ex, ey, NEON_MAGENTA, count=2,
+                                        speed_range=(80, 200),
+                                        lifetime_range=(0.2, 0.5),
+                                        size_range=(3, 7))
+                self._play_sound("explode")
+
+            # Reflex Dash: check if bullets were phased through
+            rx_level = self.player.upgrade_levels.get("reflex_dash", 0)
+            if rx_level > 0 and self.player.bullets_phased > 0:
+                self.player.reflex_timer = REFLEX_DURATION * (1.0 + 0.3 * (rx_level - 1))
+                self.particles.emit(px, py, (220, 230, 255), count=15,
+                                    speed_range=(60, 180),
+                                    lifetime_range=(0.3, 0.6))
+                self.player.bullets_phased = 0
+
+        # ── Reflex Dash: count bullets overlapping during dash ──
+        if self.player.is_dashing and self.player.upgrade_levels.get("reflex_dash", 0) > 0:
+            for bullet in list(self.enemy_bullets):
+                bdx = bullet.pos_x - self.player.pos_x
+                bdy = bullet.pos_y - self.player.pos_y
+                bdist = math.sqrt(bdx * bdx + bdy * bdy)
+                if bdist < bullet.radius + self.player.radius:
+                    self.player.bullets_phased += 1
+                    bullet.kill()  # consume the bullet
 
         self.particles.update(dt)
         self._check_collisions()
@@ -510,6 +644,21 @@ class Game:
                           GameState.UPGRADE, GameState.GAME_OVER):
             self._draw_background(surface)
 
+            # Obstacles
+            for obs in self.obstacles:
+                obs.draw(surface, self.camera)
+
+            # Ghost trail fire zones
+            for tx, ty, tlife, tdmg, tradius in self.ghost_trails:
+                tsx, tsy = self.camera.apply(tx, ty)
+                tr = self.camera.s(tradius)
+                alpha = min(180, int(180 * (tlife / 0.8)))
+                if tr > 0 and alpha > 0:
+                    trail_surf = pygame.Surface((tr * 2, tr * 2), pygame.SRCALPHA)
+                    pygame.draw.circle(trail_surf, (*NEON_ORANGE, alpha),
+                                       (tr, tr), tr)
+                    surface.blit(trail_surf, (tsx - tr, tsy - tr))
+
             for enemy in self.enemies:
                 enemy.draw(surface, self.camera)
 
@@ -521,6 +670,10 @@ class Game:
 
             if self.player:
                 self.player.draw(surface, self.camera)
+
+            # Power-ups
+            if self.powerup_manager:
+                self.powerup_manager.draw(surface, self.camera)
 
             self.particles.draw(surface, self.camera)
 

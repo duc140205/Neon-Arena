@@ -9,9 +9,14 @@ from .settings import (
     PLAYER_SPEED, PLAYER_SIZE, PLAYER_MAX_HP, PLAYER_FIRE_RATE,
     PLAYER_BULLET_SPEED, PLAYER_BULLET_DAMAGE, PLAYER_BULLET_SIZE,
     DASH_SPEED, DASH_DURATION, DASH_COOLDOWN, DASH_PARTICLES,
-    NEON_CYAN, NEON_MAGENTA, NEON_PINK, WHITE,
+    NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_ORANGE, NEON_YELLOW, WHITE,
     ARENA_WIDTH, ARENA_HEIGHT,
     BASE_XP_REQUIRED, XP_SCALE_FACTOR,
+    GHOST_TRAIL_INTERVAL, GHOST_TRAIL_LIFETIME, GHOST_TRAIL_RADIUS,
+    GHOST_TRAIL_DAMAGE,
+    SHIELD_DURATION, DOUBLE_DAMAGE_DURATION,
+    SPEED_BOOST_DURATION, SPEED_BOOST_MULT,
+    REFLEX_FIRE_RATE_MULT, REFLEX_DURATION,
 )
 from .projectiles import PlayerBullet
 
@@ -61,6 +66,7 @@ class Player(pygame.sprite.Sprite):
             "fire_rate": 0, "bullet_speed": 0, "max_hp": 0,
             "damage": 0, "move_speed": 0, "dash_cooldown": 0,
             "giant_growth": 0, "multi_barrel": 0,
+            "ghost_dash": 0, "dash_shockwave": 0, "reflex_dash": 0,
         }
 
         # Invincibility
@@ -68,8 +74,31 @@ class Player(pygame.sprite.Sprite):
         self.invincible_duration = 0.5
         self.flash_timer = 0.0
 
+        # Ghost Dash trail
+        self.ghost_trail_timer = 0.0
+        self.ghost_trail_positions = []  # [(x, y, lifetime)] - managed by game.py
+
+        # Dash-end signals (read by game.py after dash ends)
+        self.dash_ended_this_frame = False
+        self.dash_end_x = 0.0
+        self.dash_end_y = 0.0
+        self.bullets_phased = 0  # count of bullets dashed through
+
+        # Power-up buffs
+        self.shield_timer = 0.0       # seconds of shield remaining
+        self.double_damage_timer = 0.0
+        self.speed_boost_timer = 0.0
+        self.base_fire_rate = PLAYER_FIRE_RATE
+        self.reflex_timer = 0.0       # temporary fire rate buff
+
     def take_damage(self, amount):
         if self.invincible_timer > 0 or self.is_dashing:
+            return False
+        if self.shield_timer > 0:
+            # Shield absorbs the hit
+            self.shield_timer = max(0, self.shield_timer - 1.0)
+            self.particles.emit(self.pos_x, self.pos_y, NEON_CYAN, count=8,
+                                speed_range=(80, 200), lifetime_range=(0.2, 0.4))
             return False
         self.hp -= amount
         self.invincible_timer = self.invincible_duration
@@ -122,13 +151,33 @@ class Player(pygame.sprite.Sprite):
             self.image = pygame.Surface(
                 (self.radius * 2 + 4, self.radius * 2 + 4), pygame.SRCALPHA)
             self.rect = self.image.get_rect(center=(int(self.pos_x), int(self.pos_y)))
-        # multi_barrel: handled by barrel_count property (no stat change needed)
+        # multi_barrel, ghost_dash, dash_shockwave, reflex_dash:
+        # Handled by gameplay logic, no stat changes needed here
+
+    def apply_powerup(self, powerup_type):
+        """Apply a collected power-up buff."""
+        if powerup_type == "health":
+            heal = min(40, self.max_hp - self.hp)
+            self.hp += heal
+            self.particles.emit(self.pos_x, self.pos_y, NEON_CYAN, count=12,
+                                speed_range=(40, 120), lifetime_range=(0.3, 0.6))
+        elif powerup_type == "shield":
+            self.shield_timer = SHIELD_DURATION
+        elif powerup_type == "double_damage":
+            self.double_damage_timer = DOUBLE_DAMAGE_DURATION
+        elif powerup_type == "speed_boost":
+            self.speed_boost_timer = SPEED_BOOST_DURATION
 
     def update(self, dt, mouse_screen_pos, camera):
         self.fire_timer = max(0, self.fire_timer - dt)
         self.invincible_timer = max(0, self.invincible_timer - dt)
         self.flash_timer = max(0, self.flash_timer - dt)
         self.dash_cooldown_timer = max(0, self.dash_cooldown_timer - dt)
+        self.shield_timer = max(0, self.shield_timer - dt)
+        self.double_damage_timer = max(0, self.double_damage_timer - dt)
+        self.speed_boost_timer = max(0, self.speed_boost_timer - dt)
+        self.reflex_timer = max(0, self.reflex_timer - dt)
+        self.dash_ended_this_frame = False
 
         keys = pygame.key.get_pressed()
 
@@ -140,8 +189,28 @@ class Player(pygame.sprite.Sprite):
                 self.particles.emit(self.pos_x, self.pos_y, NEON_MAGENTA, count=3,
                                     speed_range=(30, 100), lifetime_range=(0.15, 0.35),
                                     size_range=(3, 6))
+
+            # Ghost Dash: leave fire trail positions
+            if self.upgrade_levels.get("ghost_dash", 0) > 0:
+                self.ghost_trail_timer -= dt
+                if self.ghost_trail_timer <= 0:
+                    self.ghost_trail_timer = GHOST_TRAIL_INTERVAL
+                    level = self.upgrade_levels["ghost_dash"]
+                    self.ghost_trail_positions.append((
+                        self.pos_x, self.pos_y,
+                        GHOST_TRAIL_LIFETIME * (1.0 + 0.3 * (level - 1)),
+                        GHOST_TRAIL_DAMAGE * level,
+                        GHOST_TRAIL_RADIUS + 4 * (level - 1),
+                    ))
+                    self.particles.emit(self.pos_x, self.pos_y, NEON_ORANGE, count=2,
+                                        speed_range=(10, 40), lifetime_range=(0.2, 0.5),
+                                        size_range=(3, 7))
+
             if self.dash_timer <= 0:
                 self.is_dashing = False
+                self.dash_ended_this_frame = True
+                self.dash_end_x = self.pos_x
+                self.dash_end_y = self.pos_y
         else:
             dx, dy = 0.0, 0.0
             if keys[pygame.K_w] or keys[pygame.K_UP]:
@@ -180,30 +249,40 @@ class Player(pygame.sprite.Sprite):
 
     def try_shoot(self, bullet_group):
         mouse_buttons = pygame.mouse.get_pressed()
+        # Effective fire rate (with reflex buff)
+        effective_fire_rate = self.fire_rate
+        if self.reflex_timer > 0:
+            effective_fire_rate *= REFLEX_FIRE_RATE_MULT
+
         if mouse_buttons[0] and self.fire_timer <= 0 and not self.is_dashing:
-            self.fire_timer = self.fire_rate
+            self.fire_timer = effective_fire_rate
             gun_dist = self.radius + 8
             count = self.barrel_count
 
+            # Double damage buff
+            dmg = self.bullet_damage
+            if self.double_damage_timer > 0:
+                dmg *= 2
+
             if count == 1:
-                # Single barrel — original behavior
                 angles = [self.aim_angle]
             else:
-                # Multi-barrel spread: evenly spaced around center
-                spread = 0.15 * (count - 1)  # total spread in radians
+                spread = 0.15 * (count - 1)
                 angles = [
                     self.aim_angle + spread * (i / (count - 1) - 0.5)
                     for i in range(count)
                 ]
 
+            bullet_color = NEON_YELLOW if self.double_damage_timer > 0 else NEON_CYAN
             for angle in angles:
                 bx = self.pos_x + math.cos(angle) * gun_dist
                 by = self.pos_y + math.sin(angle) * gun_dist
                 bullet = PlayerBullet(bx, by, angle,
-                                      self.bullet_speed, self.bullet_damage,
+                                      self.bullet_speed, dmg,
+                                      color=bullet_color,
                                       size=self.bullet_size)
                 bullet_group.add(bullet)
-                self.particles.emit(bx, by, NEON_CYAN, count=3,
+                self.particles.emit(bx, by, bullet_color, count=3,
                                     speed_range=(50, 150), lifetime_range=(0.1, 0.2),
                                     size_range=(2, 4),
                                     angle_range=(angle - 0.3, angle + 0.3))
@@ -256,6 +335,49 @@ class Player(pygame.sprite.Sprite):
             cx = sx + math.cos(self.aim_angle) * dist
             cy = sy + math.sin(self.aim_angle) * dist
             pygame.draw.circle(surface, NEON_CYAN, (int(cx), int(cy)), max(1, sc(2)))
+
+        # ── Buff indicators ──
+        # Shield ring
+        if self.shield_timer > 0:
+            pulse = int(4 * math.sin(pygame.time.get_ticks() * 0.01))
+            shield_r = r + sc(8) + pulse
+            if shield_r > 0:
+                shield_surf = pygame.Surface((shield_r * 2, shield_r * 2), pygame.SRCALPHA)
+                pygame.draw.circle(shield_surf, (*NEON_CYAN, 90),
+                                   (shield_r, shield_r), shield_r, max(1, sc(2)))
+                surface.blit(shield_surf, (sx - shield_r, sy - shield_r))
+
+        # Double damage glow
+        if self.double_damage_timer > 0:
+            dmg_r = r + sc(5)
+            if dmg_r > 0:
+                dmg_surf = pygame.Surface((dmg_r * 2, dmg_r * 2), pygame.SRCALPHA)
+                pygame.draw.circle(dmg_surf, (*NEON_YELLOW, 50),
+                                   (dmg_r, dmg_r), dmg_r)
+                surface.blit(dmg_surf, (sx - dmg_r, sy - dmg_r))
+
+        # Speed boost lines
+        if self.speed_boost_timer > 0:
+            for i in range(3):
+                trail_dist = sc(self.radius + 8 + i * 6)
+                t_angle = self.aim_angle + math.pi + (i - 1) * 0.3
+                lx = sx + math.cos(t_angle) * trail_dist
+                ly = sy + math.sin(t_angle) * trail_dist
+                lx2 = sx + math.cos(t_angle) * (trail_dist + sc(8))
+                ly2 = sy + math.sin(t_angle) * (trail_dist + sc(8))
+                pygame.draw.line(surface, NEON_MAGENTA,
+                                 (int(lx), int(ly)),
+                                 (int(lx2), int(ly2)), max(1, sc(2)))
+
+        # Reflex buff aura
+        if self.reflex_timer > 0:
+            ref_alpha = int(60 * abs(math.sin(pygame.time.get_ticks() * 0.012)))
+            ref_r = r + sc(12)
+            if ref_r > 0:
+                ref_surf = pygame.Surface((ref_r * 2, ref_r * 2), pygame.SRCALPHA)
+                pygame.draw.circle(ref_surf, (220, 230, 255, ref_alpha),
+                                   (ref_r, ref_r), ref_r, max(1, sc(1)))
+                surface.blit(ref_surf, (sx - ref_r, sy - ref_r))
 
     @property
     def alive(self):
