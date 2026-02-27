@@ -141,6 +141,24 @@ DIFFICULTY_HP_PER_LEVEL = 0.05      # +5% enemy HP per player level
 DIFFICULTY_SPEED_PER_LEVEL = 0.02   # +2% enemy speed per player level
 DIFFICULTY_DAMAGE_PER_LEVEL = 0.03  # +3% enemy damage per player level
 
+# ── Boss Settings ───────────────────────────────────────
+BOSS_WAVE_INTERVAL = 5              # boss appears every N waves
+BOSS_SPEED = 100
+BOSS_HP = 2000
+BOSS_SIZE = 40                      # radius
+BOSS_DAMAGE = 40
+BOSS_XP = 200
+BOSS_COLOR = NEON_RED
+BOSS_CHARGE_SPEED_MULT = 5.0       # speed multiplier during charge
+BOSS_CHARGE_DURATION = 1.0          # seconds
+BOSS_CHARGE_COOLDOWN = 4.0          # seconds between charges
+BOSS_SLAM_RADIUS = 200              # AOE slam radius
+BOSS_SLAM_DAMAGE = 50
+BOSS_SLAM_COOLDOWN = 6.0            # seconds between slams
+BOSS_MINION_COUNT = 3               # chasers spawned per summon
+BOSS_MINION_COOLDOWN = 6.0          # seconds between minion spawns
+BOSS_DIFFICULTY_BOOST = 0.15        # +15% permanent difficulty after boss kill
+
 # ── Enemy Special Skills ────────────────────────────────
 # Chaser — Burst Speed
 CHASER_BURST_CHANCE = 0.008         # chance per frame (~0.8% per tick)

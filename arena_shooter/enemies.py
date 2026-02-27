@@ -11,11 +11,15 @@ from .settings import (
     SHOOTER_SPEED, SHOOTER_HP, SHOOTER_SIZE, SHOOTER_DAMAGE, SHOOTER_XP, SHOOTER_COLOR,
     SHOOTER_FIRE_RATE, SHOOTER_BULLET_SPEED, SHOOTER_PREFERRED_DIST,
     TANK_SPEED, TANK_HP, TANK_SIZE, TANK_DAMAGE, TANK_XP, TANK_COLOR,
-    NEON_RED, NEON_ORANGE, NEON_PURPLE, NEON_CYAN, WHITE,
+    NEON_RED, NEON_ORANGE, NEON_PURPLE, NEON_CYAN, NEON_YELLOW, NEON_MAGENTA, WHITE,
     ARENA_WIDTH, ARENA_HEIGHT,
     CHASER_BURST_CHANCE, CHASER_BURST_SPEED_MULT, CHASER_BURST_DURATION,
     SHOOTER_FAN_BULLET_COUNT, SHOOTER_FAN_SPREAD,
     TANK_SHIELD_COOLDOWN, TANK_SHIELD_DURATION, TANK_SHIELD_REDUCTION,
+    BOSS_SPEED, BOSS_HP, BOSS_SIZE, BOSS_DAMAGE, BOSS_XP, BOSS_COLOR,
+    BOSS_CHARGE_SPEED_MULT, BOSS_CHARGE_DURATION, BOSS_CHARGE_COOLDOWN,
+    BOSS_SLAM_RADIUS, BOSS_SLAM_DAMAGE, BOSS_SLAM_COOLDOWN,
+    BOSS_MINION_COUNT, BOSS_MINION_COOLDOWN,
 )
 from .projectiles import EnemyBullet
 
@@ -386,3 +390,139 @@ class Tank(Enemy):
             pygame.draw.circle(shield_surf, (*NEON_CYAN, 100),
                                (shield_r, shield_r), shield_r, max(1, camera.s(2)))
             surface.blit(shield_surf, (sx - shield_r, sy - shield_r))
+
+
+class Boss(Enemy):
+    """Massive boss enemy with charge, AOE slam, and minion summon."""
+
+    def __init__(self, x, y, hp_multiplier=1.0, speed_multiplier=1.0, damage_multiplier=1.0):
+        super().__init__(
+            x, y,
+            speed=BOSS_SPEED * speed_multiplier,
+            hp=int(BOSS_HP * hp_multiplier),
+            size=BOSS_SIZE,
+            damage=int(BOSS_DAMAGE * damage_multiplier),
+            xp=BOSS_XP,
+            color=BOSS_COLOR,
+        )
+        self.is_boss = True
+
+        # Charge attack
+        self.charge_timer = BOSS_CHARGE_COOLDOWN * 0.5
+        self.charge_duration = 0.0
+        self.is_charging = False
+        self.charge_vx = 0.0
+        self.charge_vy = 0.0
+        self.base_speed = self.speed
+
+        # AOE Slam
+        self.slam_timer = BOSS_SLAM_COOLDOWN
+        self.slam_active = False
+        self.slam_anim_timer = 0.0
+        self.slam_hit_player = False  # read by game.py
+
+        # Minion summon
+        self.minion_timer = BOSS_MINION_COOLDOWN * 0.6
+        self.pending_minions = []  # [(x, y)] consumed by enemy_manager
+
+    def update(self, dt, player_x, player_y, enemy_bullets=None):
+        dx = player_x - self.pos_x
+        dy = player_y - self.pos_y
+        dist = math.sqrt(dx * dx + dy * dy)
+        ndx = dx / dist if dist > 0 else 0
+        ndy = dy / dist if dist > 0 else 0
+
+        # ── Charge attack ──
+        if self.is_charging:
+            self.charge_duration -= dt
+            self.pos_x += self.charge_vx * dt
+            self.pos_y += self.charge_vy * dt
+            if self.charge_duration <= 0:
+                self.is_charging = False
+                self.charge_timer = BOSS_CHARGE_COOLDOWN
+        else:
+            # Normal movement toward player
+            self.pos_x += ndx * self.speed * dt
+            self.pos_y += ndy * self.speed * dt
+
+            self.charge_timer -= dt
+            if self.charge_timer <= 0 and dist < 600:
+                self.is_charging = True
+                self.charge_duration = BOSS_CHARGE_DURATION
+                self.charge_vx = ndx * self.base_speed * BOSS_CHARGE_SPEED_MULT
+                self.charge_vy = ndy * self.base_speed * BOSS_CHARGE_SPEED_MULT
+
+        # ── AOE Slam ──
+        self.slam_timer -= dt
+        self.slam_hit_player = False
+        if self.slam_active:
+            self.slam_anim_timer -= dt
+            if self.slam_anim_timer <= 0:
+                self.slam_active = False
+        elif self.slam_timer <= 0 and dist < BOSS_SLAM_RADIUS + 50:
+            self.slam_active = True
+            self.slam_anim_timer = 0.4  # animation duration
+            self.slam_timer = BOSS_SLAM_COOLDOWN
+            if dist < BOSS_SLAM_RADIUS:
+                self.slam_hit_player = True
+
+        # ── Minion summon ──
+        self.minion_timer -= dt
+        if self.minion_timer <= 0:
+            self.minion_timer = BOSS_MINION_COOLDOWN
+            for i in range(BOSS_MINION_COUNT):
+                angle = (i / BOSS_MINION_COUNT) * math.pi * 2
+                mx = self.pos_x + math.cos(angle) * 80
+                my = self.pos_y + math.sin(angle) * 80
+                self.pending_minions.append((mx, my))
+
+        super().update(dt, player_x, player_y)
+
+    def _draw_shape(self, surface, sx, sy, color, camera):
+        """Draw as a large octagon with inner glow and pulsing aura."""
+        r = camera.s(self.radius)
+        sc = camera.s
+
+        # Pulsing outer aura
+        pulse = 0.7 + 0.3 * math.sin(pygame.time.get_ticks() * 0.005)
+        aura_r = int(r * 1.6 * pulse)
+        if aura_r > 0:
+            aura_surf = pygame.Surface((aura_r * 2, aura_r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(aura_surf, (*NEON_RED, 35),
+                               (aura_r, aura_r), aura_r)
+            surface.blit(aura_surf, (sx - aura_r, sy - aura_r))
+
+        # Octagonal body
+        points = []
+        for i in range(8):
+            angle = i * math.pi / 4 + pygame.time.get_ticks() * 0.0005
+            px = sx + math.cos(angle) * r
+            py = sy + math.sin(angle) * r
+            points.append((int(px), int(py)))
+
+        draw_color = WHITE if self.is_charging else color
+        width = max(1, sc(3 if self.is_charging else 2))
+        pygame.draw.polygon(surface, draw_color, points, width)
+
+        # Inner fill
+        pad = r + sc(2)
+        inner_surf = pygame.Surface((pad * 2, pad * 2), pygame.SRCALPHA)
+        shifted = [(p[0] - sx + pad, p[1] - sy + pad) for p in points]
+        alpha = 100 if self.is_charging else 50
+        pygame.draw.polygon(inner_surf, (*color, alpha), shifted)
+        surface.blit(inner_surf, (sx - pad, sy - pad))
+
+        # Core
+        core_r = max(1, r // 3)
+        pygame.draw.circle(surface, draw_color, (sx, sy), core_r)
+
+        # Slam ring animation
+        if self.slam_active:
+            slam_progress = 1.0 - (self.slam_anim_timer / 0.4)
+            slam_r = int(camera.s(BOSS_SLAM_RADIUS) * slam_progress)
+            if slam_r > 0:
+                slam_surf = pygame.Surface((slam_r * 2, slam_r * 2), pygame.SRCALPHA)
+                ring_alpha = int(150 * (1.0 - slam_progress))
+                pygame.draw.circle(slam_surf, (*NEON_YELLOW, ring_alpha),
+                                   (slam_r, slam_r), slam_r, max(1, sc(3)))
+                surface.blit(slam_surf, (sx - slam_r, sy - slam_r))

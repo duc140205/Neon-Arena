@@ -9,10 +9,13 @@ import math
 import random
 from .settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT,
+    ARENA_WIDTH, ARENA_HEIGHT,
     NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_YELLOW, NEON_GREEN, NEON_PURPLE, NEON_RED,
+    NEON_ORANGE,
     WHITE, BLACK, DARK_BG, GRAY, DARK_GRAY,
     HP_BAR, HP_BAR_BG, XP_BAR, XP_BAR_BG,
     UPGRADES,
+    POWERUP_TYPES,
 )
 
 
@@ -128,16 +131,134 @@ class UI:
         fr = fps_text.get_rect(topright=(W - s(20), s(100)))
         surface.blit(fps_text, fr)
 
-    def draw_wave_announcement(self, surface, wave_num, timer):
+    def draw_minimap(self, surface, player, obstacles, powerups, enemies, boss=None):
+        """Draw a minimap overlay in the bottom-right corner."""
+        s = self._s
+        W, H = self.W, self.H
+
+        map_w = s(160)
+        map_h = s(160)
+        margin = s(15)
+        map_x = W - map_w - margin
+        map_y = H - map_h - margin
+
+        # Scale factors: arena coords -> minimap coords
+        sx_ratio = map_w / ARENA_WIDTH
+        sy_ratio = map_h / ARENA_HEIGHT
+
+        # Separate alpha surface
+        mm_surf = pygame.Surface((map_w, map_h), pygame.SRCALPHA)
+        mm_surf.fill((10, 10, 30, 160))
+
+        # Border
+        pygame.draw.rect(mm_surf, (*NEON_CYAN, 120), (0, 0, map_w, map_h), max(1, s(1)))
+
+        # Obstacles (gray blocks)
+        for obs in obstacles:
+            ox = int(obs.x * sx_ratio)
+            oy = int(obs.y * sy_ratio)
+            ow = max(1, int(obs.w * sx_ratio))
+            oh = max(1, int(obs.h * sy_ratio))
+            pygame.draw.rect(mm_surf, (60, 60, 80, 180), (ox, oy, ow, oh))
+
+        # Enemies (small red dots)
+        for enemy in enemies:
+            ex = int(enemy.pos_x * sx_ratio)
+            ey = int(enemy.pos_y * sy_ratio)
+            is_boss_enemy = hasattr(enemy, 'is_boss') and enemy.is_boss
+            if is_boss_enemy:
+                # Boss: large pulsing red icon
+                pulse = int(2 * math.sin(pygame.time.get_ticks() * 0.008))
+                br = max(2, s(5) + pulse)
+                pygame.draw.circle(mm_surf, (*NEON_RED, 220), (ex, ey), br)
+                pygame.draw.circle(mm_surf, (*NEON_YELLOW, 150), (ex, ey), br, 1)
+            else:
+                pygame.draw.circle(mm_surf, (*NEON_RED, 180), (ex, ey), max(1, s(2)))
+
+        # Power-ups (colored dots)
+        for pu in powerups:
+            px = int(pu.pos_x * sx_ratio)
+            py = int(pu.pos_y * sy_ratio)
+            pygame.draw.circle(mm_surf, (*pu.color, 200), (px, py), max(1, s(3)))
+
+        # Player (bright cyan dot)
+        ppx = int(player.pos_x * sx_ratio)
+        ppy = int(player.pos_y * sy_ratio)
+        pygame.draw.circle(mm_surf, NEON_CYAN, (ppx, ppy), max(2, s(3)))
+        # Tiny glow
+        glow_r = max(3, s(5))
+        glow_surf = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
+        pygame.draw.circle(glow_surf, (*NEON_CYAN, 60), (glow_r, glow_r), glow_r)
+        mm_surf.blit(glow_surf, (ppx - glow_r, ppy - glow_r))
+
+        # Label
+        label = self.font_tiny.render("MAP", True, NEON_CYAN)
+        mm_surf.blit(label, (s(4), s(2)))
+
+        surface.blit(mm_surf, (map_x, map_y))
+
+    def draw_boss_hp_bar(self, surface, wave_info):
+        """Draw a dramatic boss HP bar at the top-center of the screen."""
+        if not wave_info.get("boss_active", False):
+            return
+
+        s = self._s
+        W = self.W
+
+        bar_w = s(500)
+        bar_h = s(24)
+        bar_x = (W - bar_w) // 2
+        bar_y = s(12)
+
+        # Background
+        bg_rect = pygame.Rect(bar_x - s(4), bar_y - s(4),
+                              bar_w + s(8), bar_h + s(8))
+        bg_surf = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
+        bg_surf.fill((15, 5, 20, 200))
+        surface.blit(bg_surf, bg_rect.topleft)
+        pygame.draw.rect(surface, NEON_RED, bg_rect, max(1, s(2)), border_radius=s(4))
+
+        # HP fill
+        hp_ratio = max(0, wave_info["boss_hp"] / max(1, wave_info["boss_max_hp"]))
+        fill_w = int(bar_w * hp_ratio)
+        if fill_w > 0:
+            # Pulsing intensity
+            pulse = 0.8 + 0.2 * math.sin(pygame.time.get_ticks() * 0.006)
+            fill_color = (
+                int(min(255, NEON_RED[0] * pulse)),
+                int(min(255, NEON_RED[1] * pulse)),
+                int(min(255, NEON_RED[2] * pulse)),
+            )
+            self._draw_rounded_bar(surface, bar_x, bar_y, fill_w, bar_h, fill_color)
+
+        # Label
+        boss_text = self.font_medium.render("⚠ BOSS ⚠", True, NEON_YELLOW)
+        tr = boss_text.get_rect(center=(W // 2, bar_y + bar_h + s(16)))
+        surface.blit(boss_text, tr)
+
+        # HP numbers
+        hp_nums = self.font_tiny.render(
+            f"{wave_info['boss_hp']}/{wave_info['boss_max_hp']}", True, WHITE)
+        hr = hp_nums.get_rect(center=(W // 2, bar_y + bar_h // 2))
+        surface.blit(hp_nums, hr)
+
+    def draw_wave_announcement(self, surface, wave_num, timer, is_boss=False):
         if timer <= 0:
             return
         W, H = self.W, self.H
         alpha = min(255, int(timer * 255))
-        text = self.font_large.render(f"// WAVE {wave_num} //", True, NEON_CYAN)
+
+        if is_boss:
+            text = self.font_large.render(f"// WAVE {wave_num} — BOSS //", True, NEON_RED)
+        else:
+            text = self.font_large.render(f"// WAVE {wave_num} //", True, NEON_CYAN)
         text.set_alpha(alpha)
         text_rect = text.get_rect(center=(W // 2, H // 2 - self._s(30)))
         surface.blit(text, text_rect)
-        sub = self.font_small.render("INCOMING HOSTILES", True, NEON_MAGENTA)
+
+        sub_msg = "⚠ BOSS FIGHT ⚠" if is_boss else "INCOMING HOSTILES"
+        sub_color = NEON_YELLOW if is_boss else NEON_MAGENTA
+        sub = self.font_small.render(sub_msg, True, sub_color)
         sub.set_alpha(alpha)
         sub_rect = sub.get_rect(center=(W // 2, H // 2 + self._s(20)))
         surface.blit(sub, sub_rect)

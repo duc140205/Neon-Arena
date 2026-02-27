@@ -17,6 +17,7 @@ from .settings import (
     SHOCKWAVE_RADIUS, SHOCKWAVE_PUSHBACK,
     REFLEX_DURATION,
     SPEED_BOOST_MULT,
+    BOSS_SLAM_DAMAGE,
 )
 from .obstacles import generate_obstacles, PowerUpManager
 from .config import Config, resource_path
@@ -652,6 +653,15 @@ class Game:
                 if dist < enemy.radius + self.player.radius:
                     self.player.take_damage(enemy.damage)
 
+        # Boss slam damage
+        for enemy in self.enemies:
+            if hasattr(enemy, 'is_boss') and enemy.is_boss and enemy.slam_hit_player:
+                self.player.take_damage(BOSS_SLAM_DAMAGE)
+                self.particles.emit_explosion(
+                    self.player.pos_x, self.player.pos_y,
+                    color=NEON_YELLOW, count=20)
+                self._play_sound("explode")
+
     # ── Drawing ──────────────────────────────────────────
 
     def _draw(self, surface):
@@ -703,11 +713,22 @@ class Game:
             wave_info = self.enemy_manager.wave_info
             self.ui.draw_hud(surface, self.player, wave_info, self.fps)
 
+            # Mini-map
+            powerup_list = self.powerup_manager.powerups if self.powerup_manager else []
+            self.ui.draw_minimap(
+                surface, self.player, self.obstacles,
+                powerup_list, self.enemies,
+                boss=self.enemy_manager.active_boss)
+
+            # Boss HP bar
+            self.ui.draw_boss_hp_bar(surface, wave_info)
+
             if wave_info["announcing"]:
                 self.ui.draw_wave_announcement(
                     surface,
                     wave_info["wave"],
                     self.enemy_manager.wave_announcement_timer,
+                    is_boss=wave_info.get("boss_wave", False),
                 )
 
             if self.state == GameState.PAUSED:

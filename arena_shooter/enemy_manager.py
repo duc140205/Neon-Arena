@@ -4,12 +4,13 @@ enemy_manager.py - Wave spawning and difficulty scaling
 
 import random
 import math
-from .enemies import Chaser, Shooter, Tank
+from .enemies import Chaser, Shooter, Tank, Boss
 from .settings import (
     ARENA_WIDTH, ARENA_HEIGHT, SPAWN_MARGIN, SPAWN_MIN_DIST,
     WAVE_BREAK_TIME, SCREEN_WIDTH, SCREEN_HEIGHT,
     DIFFICULTY_HP_PER_LEVEL, DIFFICULTY_SPEED_PER_LEVEL,
     DIFFICULTY_DAMAGE_PER_LEVEL,
+    BOSS_WAVE_INTERVAL, BOSS_SLAM_DAMAGE, BOSS_DIFFICULTY_BOOST,
 )
 
 
@@ -43,34 +44,35 @@ class EnemyManager:
 
         # Difficulty factor increases with player level
         self.difficulty_factor = 1.0
+        self.boss_difficulty_bonus = 0.0  # permanent bonus from boss kills
+
+        # Boss tracking
+        self.active_boss = None
+        self.boss_wave = False
 
     def set_difficulty(self, player_level):
-        """Update difficulty based on player level.
+        """Update difficulty based on player level."""
+        lvl = player_level - 1
+        self.difficulty_factor = 1.0 + lvl * 0.05 + self.boss_difficulty_bonus
 
-        Called by game.py whenever the player levels up.
-        Scales enemy HP, speed, and damage multiplicatively.
-        """
-        lvl = player_level - 1  # level 1 = no bonus
-        self.difficulty_factor = 1.0 + lvl * 0.05  # ~5% total per level
+    def _is_boss_wave(self, wave_num):
+        """Check if this wave is a boss fight."""
+        return wave_num > 0 and wave_num % BOSS_WAVE_INTERVAL == 0
 
     def _generate_wave(self, wave_num):
         """Generate a wave definition based on wave number."""
-        # Base counts that scale with wave number
         chasers = 3 + wave_num * 2
         shooters = max(0, wave_num - 1)
         tanks = max(0, (wave_num - 3) // 2)
 
-        # Cap individual counts for sanity
         chasers = min(chasers, 20)
         shooters = min(shooters, 10)
         tanks = min(tanks, 5)
 
-        # Wave-based scaling
-        wave_hp = 1.0 + (wave_num - 1) * 0.1       # +10% HP per wave
-        wave_speed = 1.0 + (wave_num - 1) * 0.03    # +3% speed per wave
-        wave_damage = 1.0 + (wave_num - 1) * 0.05   # +5% damage per wave
+        wave_hp = 1.0 + (wave_num - 1) * 0.1
+        wave_speed = 1.0 + (wave_num - 1) * 0.03
+        wave_damage = 1.0 + (wave_num - 1) * 0.05
 
-        # Apply player-level difficulty on top
         df = self.difficulty_factor
         hp_mult = wave_hp * (1.0 + (df - 1.0) * DIFFICULTY_HP_PER_LEVEL / 0.05)
         speed_mult = wave_speed * (1.0 + (df - 1.0) * DIFFICULTY_SPEED_PER_LEVEL / 0.05)
@@ -82,36 +84,32 @@ class EnemyManager:
     def _get_spawn_pos(self, player_x, player_y, camera_rect):
         """Get a valid spawn position outside the camera view but inside arena."""
         for _ in range(50):
-            # Spawn at edges of camera view or further
             side = random.randint(0, 3)
-            if side == 0:  # top
+            if side == 0:
                 x = random.uniform(camera_rect.left - SPAWN_MARGIN,
                                    camera_rect.right + SPAWN_MARGIN)
                 y = camera_rect.top - random.uniform(50, SPAWN_MARGIN)
-            elif side == 1:  # bottom
+            elif side == 1:
                 x = random.uniform(camera_rect.left - SPAWN_MARGIN,
                                    camera_rect.right + SPAWN_MARGIN)
                 y = camera_rect.bottom + random.uniform(50, SPAWN_MARGIN)
-            elif side == 2:  # left
+            elif side == 2:
                 x = camera_rect.left - random.uniform(50, SPAWN_MARGIN)
                 y = random.uniform(camera_rect.top - SPAWN_MARGIN,
                                    camera_rect.bottom + SPAWN_MARGIN)
-            else:  # right
+            else:
                 x = camera_rect.right + random.uniform(50, SPAWN_MARGIN)
                 y = random.uniform(camera_rect.top - SPAWN_MARGIN,
                                    camera_rect.bottom + SPAWN_MARGIN)
 
-            # Clamp to arena
             x = max(30, min(ARENA_WIDTH - 30, x))
             y = max(30, min(ARENA_HEIGHT - 30, y))
 
-            # Ensure minimum distance from player
             dx = x - player_x
             dy = y - player_y
             if math.sqrt(dx * dx + dy * dy) >= SPAWN_MIN_DIST:
                 return x, y
 
-        # Fallback: random position far from player
         angle = random.uniform(0, math.pi * 2)
         dist = SPAWN_MIN_DIST + 100
         x = player_x + math.cos(angle) * dist
@@ -125,22 +123,58 @@ class EnemyManager:
         self.enemies_alive = len(enemy_group)
         self.wave_announcement_timer = max(0, self.wave_announcement_timer - dt)
 
+        # Track boss state
+        if self.active_boss and not self.active_boss.alive():
+            # Boss defeated — permanent difficulty boost
+            self.boss_difficulty_bonus += BOSS_DIFFICULTY_BOOST
+            self.difficulty_factor += BOSS_DIFFICULTY_BOOST
+            self.active_boss = None
+
+        # Spawn boss minions
+        if self.active_boss and self.active_boss.alive():
+            if self.active_boss.pending_minions:
+                for mx, my in self.active_boss.pending_minions:
+                    mx = max(30, min(ARENA_WIDTH - 30, mx))
+                    my = max(30, min(ARENA_HEIGHT - 30, my))
+                    minion = Chaser(mx, my, 1.0, 1.0, 1.0)
+                    enemy_group.add(minion)
+                self.active_boss.pending_minions.clear()
+
         if self.wave_active:
-            # Check if wave is cleared
             if self.enemies_alive == 0:
                 self.wave_active = False
+                self.boss_wave = False
                 self.wave_timer = WAVE_BREAK_TIME
             return False
         else:
-            # Waiting for next wave
             self.wave_timer -= dt
             if self.wave_timer <= 0:
                 self.wave += 1
                 self.wave_active = True
                 self.wave_announcement_timer = 2.0
-                self._spawn_wave(enemy_group, player_x, player_y, camera_rect)
+
+                if self._is_boss_wave(self.wave):
+                    self.boss_wave = True
+                    self._spawn_boss(enemy_group, player_x, player_y, camera_rect)
+                else:
+                    self._spawn_wave(enemy_group, player_x, player_y, camera_rect)
                 return True
         return False
+
+    def _spawn_boss(self, enemy_group, player_x, player_y, camera_rect):
+        """Spawn a boss + a few escort enemies."""
+        x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
+        wave_def = self._generate_wave(self.wave)
+        boss = Boss(x, y, wave_def.hp_mult, wave_def.speed_mult,
+                    wave_def.damage_mult)
+        enemy_group.add(boss)
+        self.active_boss = boss
+
+        # Small escort
+        for _ in range(3):
+            ex, ey = self._get_spawn_pos(player_x, player_y, camera_rect)
+            enemy_group.add(Chaser(ex, ey, wave_def.hp_mult, wave_def.speed_mult,
+                                   wave_def.damage_mult))
 
     def _spawn_wave(self, enemy_group, player_x, player_y, camera_rect):
         """Spawn all enemies for the current wave."""
@@ -170,10 +204,14 @@ class EnemyManager:
 
     @property
     def wave_info(self):
+        boss = self.active_boss
         return {
             "wave": self.wave,
             "enemies_alive": self.enemies_alive,
             "total_killed": self.total_enemies_killed,
             "announcing": self.wave_announcement_timer > 0,
+            "boss_active": boss is not None and boss.alive(),
+            "boss_hp": boss.hp if boss and boss.alive() else 0,
+            "boss_max_hp": boss.max_hp if boss and boss.alive() else 1,
+            "boss_wave": self.boss_wave,
         }
-
