@@ -164,7 +164,7 @@ Neon-Arena/
 
 | Role | Name |
 |:---|:---|
-| **Developer** | *Your Name Here* |
+| **Developer** | Hoang Le Thanh Duc |
 | **Engine** | [Pygame](https://www.pygame.org/) |
 
 ---
