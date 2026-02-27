@@ -151,6 +151,7 @@ class PowerUp:
         self.lifetime = POWERUP_LIFETIME
         self.alive = True
         self.bob_offset = random.uniform(0, math.pi * 2)
+        self.just_spawned = True  # triggers spawn VFX once
 
     def update(self, dt):
         self.lifetime -= dt
@@ -201,13 +202,14 @@ class PowerUp:
 class PowerUpManager:
     """Manages spawning and lifetime of power-ups in the arena."""
 
-    def __init__(self, obstacles):
+    def __init__(self, obstacles, particle_system=None):
         self.powerups = []
         self.spawn_timer = POWERUP_SPAWN_INTERVAL * 0.5  # first spawn sooner
         self.obstacles = obstacles
+        self.particles = particle_system
 
     def update(self, dt, player_x, player_y, player_radius):
-        """Update all powerups. Returns list of collected powerup types."""
+        """Update all powerups. Returns list of (type, color) collected."""
         self.spawn_timer -= dt
         collected = []
 
@@ -218,12 +220,21 @@ class PowerUpManager:
 
         # Update existing
         for pu in self.powerups[:]:
+            # Fire spawn VFX once
+            if pu.just_spawned and self.particles:
+                self.particles.emit_powerup_spawn(pu.pos_x, pu.pos_y, pu.color)
+                pu.just_spawned = False
+
             pu.update(dt)
             if not pu.alive:
                 self.powerups.remove(pu)
                 continue
             if pu.collides_player(player_x, player_y, player_radius):
-                collected.append(pu.type)
+                collected.append((pu.type, pu.color))
+                # Collection VFX
+                if self.particles:
+                    self.particles.emit_powerup_collect(
+                        pu.pos_x, pu.pos_y, pu.color)
                 self.powerups.remove(pu)
 
         return collected

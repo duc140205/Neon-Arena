@@ -282,7 +282,7 @@ class Game:
         self.enemy_bullets.empty()
         self.player = Player(ARENA_WIDTH / 2, ARENA_HEIGHT / 2, self.particles)
         self.obstacles = generate_obstacles()
-        self.powerup_manager = PowerUpManager(self.obstacles)
+        self.powerup_manager = PowerUpManager(self.obstacles, self.particles)
         self.ghost_trails = []
         self.upgrade_options = []
         self.pending_levelups = 0
@@ -499,9 +499,32 @@ class Game:
         if self.powerup_manager:
             collected = self.powerup_manager.update(
                 dt, self.player.pos_x, self.player.pos_y, self.player.radius)
-            for pu_type in collected:
+            for pu_type, pu_color in collected:
                 self.player.apply_powerup(pu_type)
                 self._play_sound("levelup")
+
+        # ── Speed Buff: digital dust trail ──
+        if self.player.speed_boost_timer > 0 and not self.player.is_dashing:
+            keys = pygame.key.get_pressed()
+            moving = any([
+                keys[pygame.K_w], keys[pygame.K_s],
+                keys[pygame.K_a], keys[pygame.K_d],
+                keys[pygame.K_UP], keys[pygame.K_DOWN],
+                keys[pygame.K_LEFT], keys[pygame.K_RIGHT],
+            ])
+            if moving:
+                self.particles.emit_speed_trail(
+                    self.player.pos_x, self.player.pos_y,
+                    self.player.aim_angle)
+
+        # ── Damage Buff: barrel sparks ──
+        if self.player.double_damage_timer > 0 and not self.player.is_dashing:
+            gun_dist = self.player.radius + 10
+            tip_x = self.player.pos_x + math.cos(self.player.aim_angle) * gun_dist
+            tip_y = self.player.pos_y + math.sin(self.player.aim_angle) * gun_dist
+            if random.random() < 0.4:  # don't spam every frame
+                self.particles.emit_barrel_sparks(
+                    tip_x, tip_y, self.player.aim_angle)
 
         # ── Ghost Trail damage ──
         # Merge player's trail positions into game's active trails

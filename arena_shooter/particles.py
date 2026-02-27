@@ -120,6 +120,69 @@ class ParticleSystem:
             p.init(x, y, vx, vy, random.uniform(0.5, 1.0),
                    random.choice(colors), random.uniform(3, 6))
 
+    def emit_powerup_spawn(self, x, y, color):
+        """Ring of particles when a power-up appears."""
+        for i in range(16):
+            angle = (i / 16) * math.pi * 2
+            p = self._get_particle()
+            speed = random.uniform(60, 140)
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            p.init(x, y, vx, vy, random.uniform(0.4, 0.8),
+                   color, random.uniform(2, 5))
+
+    def emit_powerup_collect(self, x, y, color):
+        """High-density starburst when player collects a power-up."""
+        # Inner dense burst
+        for _ in range(25):
+            angle = random.uniform(0, math.pi * 2)
+            speed = random.uniform(100, 350)
+            p = self._get_particle()
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            p.init(x, y, vx, vy, random.uniform(0.3, 0.9),
+                   color, random.uniform(3, 7))
+        # Outer ring flash
+        for i in range(12):
+            angle = (i / 12) * math.pi * 2
+            p = self._get_particle()
+            speed = random.uniform(200, 400)
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            bright_color = (
+                min(255, color[0] + 80),
+                min(255, color[1] + 80),
+                min(255, color[2] + 80),
+            )
+            p.init(x, y, vx, vy, random.uniform(0.2, 0.5),
+                   bright_color, random.uniform(2, 4), fade=True, shrink=False)
+
+    def emit_speed_trail(self, x, y, move_angle):
+        """Digital dust trail behind the player during speed buff."""
+        # Emit behind the player (opposite of movement)
+        back_angle = move_angle + math.pi
+        for _ in range(2):
+            offset_angle = back_angle + random.uniform(-0.6, 0.6)
+            speed = random.uniform(20, 80)
+            p = self._get_particle()
+            vx = math.cos(offset_angle) * speed
+            vy = math.sin(offset_angle) * speed
+            # Small, dim particles for "digital dust"
+            p.init(x + random.uniform(-5, 5), y + random.uniform(-5, 5),
+                   vx, vy, random.uniform(0.15, 0.4),
+                   NEON_MAGENTA, random.uniform(1.5, 3.5))
+
+    def emit_barrel_sparks(self, x, y, barrel_angle):
+        """Orange sparks at gun barrel tip — damage buff visual."""
+        for _ in range(2):
+            spark_angle = barrel_angle + random.uniform(-0.5, 0.5)
+            speed = random.uniform(30, 100)
+            p = self._get_particle()
+            vx = math.cos(spark_angle) * speed
+            vy = math.sin(spark_angle) * speed
+            p.init(x, y, vx, vy, random.uniform(0.1, 0.25),
+                   NEON_ORANGE, random.uniform(1, 3))
+
     def update(self, dt):
         for p in self.pool:
             if p.active:

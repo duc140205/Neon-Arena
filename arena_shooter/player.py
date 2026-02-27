@@ -337,15 +337,38 @@ class Player(pygame.sprite.Sprite):
             pygame.draw.circle(surface, NEON_CYAN, (int(cx), int(cy)), max(1, sc(2)))
 
         # ── Buff indicators ──
-        # Shield ring
+        # Shield: hexagonal holographic outline
         if self.shield_timer > 0:
-            pulse = int(4 * math.sin(pygame.time.get_ticks() * 0.01))
-            shield_r = r + sc(8) + pulse
-            if shield_r > 0:
-                shield_surf = pygame.Surface((shield_r * 2, shield_r * 2), pygame.SRCALPHA)
-                pygame.draw.circle(shield_surf, (*NEON_CYAN, 90),
-                                   (shield_r, shield_r), shield_r, max(1, sc(2)))
-                surface.blit(shield_surf, (sx - shield_r, sy - shield_r))
+            pulse = 0.6 + 0.4 * math.sin(pygame.time.get_ticks() * 0.008)
+            shield_r = r + sc(10)
+            rot = pygame.time.get_ticks() * 0.001  # slow rotation
+            if shield_r > 2:
+                shield_surf = pygame.Surface(
+                    (shield_r * 2 + 4, shield_r * 2 + 4), pygame.SRCALPHA)
+                cx_s, cy_s = shield_r + 2, shield_r + 2
+                # Outer hex
+                hex_pts = []
+                for i in range(6):
+                    angle = rot + i * math.pi / 3
+                    hx = cx_s + math.cos(angle) * shield_r
+                    hy = cy_s + math.sin(angle) * shield_r
+                    hex_pts.append((int(hx), int(hy)))
+                alpha_outer = int(120 * pulse)
+                pygame.draw.polygon(shield_surf,
+                                    (*NEON_CYAN, alpha_outer),
+                                    hex_pts, max(1, sc(2)))
+                # Inner hex (smaller, dimmer)
+                inner_hex = []
+                for i in range(6):
+                    angle = rot + math.pi / 6 + i * math.pi / 3
+                    hx = cx_s + math.cos(angle) * (shield_r * 0.7)
+                    hy = cy_s + math.sin(angle) * (shield_r * 0.7)
+                    inner_hex.append((int(hx), int(hy)))
+                alpha_inner = int(60 * pulse)
+                pygame.draw.polygon(shield_surf,
+                                    (*NEON_CYAN, alpha_inner),
+                                    inner_hex, max(1, sc(1)))
+                surface.blit(shield_surf, (sx - cx_s, sy - cy_s))
 
         # Double damage glow
         if self.double_damage_timer > 0:
