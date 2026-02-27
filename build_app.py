@@ -25,7 +25,7 @@ import os
 # ── Configuration ────────────────────────────────────────────────────────────
 APP_NAME = "NeonArena"
 ENTRY_POINT = "main.py"
-ICON_PATH = "neonarena.ico"
+ICON_PATH = os.path.join("assets", "neonarena.ico")
 
 # Project root = directory this script lives in
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -34,7 +34,7 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 # settings.json is placed at the bundle root so resource_path("settings.json") works.
 _ALL_DATA_FILES = [
     (os.path.join(PROJECT_ROOT, "settings.json"), "."),
-    (os.path.join(PROJECT_ROOT, "neonarena.ico"), "."),
+    (os.path.join(PROJECT_ROOT, "assets", "neonarena.ico"), "assets"),
 ]
 # Only include files that actually exist
 DATA_FILES = []

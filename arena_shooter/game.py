@@ -59,7 +59,7 @@ class Game:
 
         # ── Window / Taskbar Icon ────────────────────────
         try:
-            icon_path = resource_path("neonarena.ico")
+            icon_path = resource_path(os.path.join("assets", "neonarena.ico"))
             if os.path.exists(icon_path):
                 icon_surface = pygame.image.load(icon_path)
                 pygame.display.set_icon(icon_surface)

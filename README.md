@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="neonarena.ico" alt="Neon Arena Icon" width="80"/>
+  <img src="assets/neonarena.ico" alt="Neon Arena Icon" width="80"/>
 </p>
 
 <h1 align="center">⚡ NEON ARENA ⚡</h1>
@@ -132,7 +132,9 @@ Neon-Arena/
 │   ├── ui.py                # HUD, menus, mini-map, boss bars
 │   └── config.py            # Display & audio config persistence
 ├── settings.json            # User settings (auto-generated)
-├── neonarena.ico            # Application icon
+├── assets/
+│   ├── neonarena.ico            # Application icon
+│   └── mainmenu.png             # Main menu background
 ├── NeonArena.spec           # PyInstaller build spec
 └── build_app.py             # Build script for .exe distribution
 ```
