@@ -103,7 +103,7 @@ REFLEX_DURATION = 3.0             # seconds of boosted fire rate
 CHASER_SPEED = 150
 CHASER_HP = 50
 CHASER_SIZE = 16
-CHASER_DAMAGE = 15
+CHASER_DAMAGE = 8
 CHASER_XP = 20
 CHASER_COLOR = NEON_RED
 
@@ -122,7 +122,7 @@ SHOOTER_COLOR = NEON_ORANGE
 TANK_SPEED = 60
 TANK_HP = 200
 TANK_SIZE = 28
-TANK_DAMAGE = 30
+TANK_DAMAGE = 18
 TANK_XP = 50
 TANK_COLOR = NEON_PURPLE
 
@@ -146,7 +146,7 @@ BOSS_WAVE_INTERVAL = 5              # boss appears every N waves
 BOSS_SPEED = 100
 BOSS_HP = 2000
 BOSS_SIZE = 40                      # radius
-BOSS_DAMAGE = 40
+BOSS_DAMAGE = 25
 BOSS_XP = 200
 BOSS_COLOR = NEON_RED
 BOSS_CHARGE_SPEED_MULT = 5.0       # speed multiplier during charge
@@ -158,6 +158,37 @@ BOSS_SLAM_COOLDOWN = 6.0            # seconds between slams
 BOSS_MINION_COUNT = 3               # chasers spawned per summon
 BOSS_MINION_COOLDOWN = 6.0          # seconds between minion spawns
 BOSS_DIFFICULTY_BOOST = 0.15        # +15% permanent difficulty after boss kill
+
+# ── SniperBoss Settings ─────────────────────────────────
+SNIPER_BOSS_SPEED = 70
+SNIPER_BOSS_HP = 1800
+SNIPER_BOSS_SIZE = 36
+SNIPER_BOSS_DAMAGE = 20
+SNIPER_BOSS_XP = 250
+SNIPER_BOSS_COLOR = NEON_CYAN
+SNIPER_BOSS_PREFERRED_DIST = 600    # stays far from player
+SNIPER_BOSS_FIRE_RATE = 2.0         # laser shot every 2 seconds
+SNIPER_BOSS_BULLET_SPEED = 800      # high-speed laser
+SNIPER_BOSS_RING_COOLDOWN = 5.0     # ring of death every 5 seconds
+SNIPER_BOSS_RING_BULLET_COUNT = 12  # 12 bullets in 360 degrees
+SNIPER_BOSS_RING_BULLET_SPEED = 400
+
+# ── SlimeBoss Settings ──────────────────────────────────
+SLIME_BOSS_SPEED = 50
+SLIME_BOSS_HP = 2500
+SLIME_BOSS_SIZE = 45
+SLIME_BOSS_DAMAGE = 15
+SLIME_BOSS_XP = 300
+SLIME_BOSS_COLOR = NEON_GREEN
+SLIME_BOSS_TRAIL_DAMAGE = 5         # damage per tick from toxic trail
+SLIME_BOSS_TRAIL_INTERVAL = 0.15    # seconds between trail drops
+SLIME_BOSS_TRAIL_LIFETIME = 3.0     # how long the toxic pool lasts
+SLIME_BOSS_TRAIL_RADIUS = 25        # radius of each toxic pool
+SLIME_BOSS_JUMP_COOLDOWN = 6.0      # seconds between jumps
+SLIME_BOSS_JUMP_SPEED = 1200        # speed during jump
+SLIME_BOSS_JUMP_DURATION = 0.4      # seconds of jump
+SLIME_BOSS_SHOCKWAVE_RADIUS = 180   # landing shockwave radius
+SLIME_BOSS_SHOCKWAVE_DAMAGE = 35    # landing shockwave damage
 
 # ── Enemy Special Skills ────────────────────────────────
 # Chaser — Burst Speed
@@ -231,7 +262,7 @@ UPGRADES = {
         "desc": "Extra barrel +1",
         "icon": "⊕",
         "color": NEON_BLUE,
-        "max_level": 2,
+        "max_level": 12,
     },
     "ghost_dash": {
         "name": "GHOST DASH",

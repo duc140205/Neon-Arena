@@ -12,12 +12,13 @@ from .settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT, FPS, TITLE,
     ARENA_WIDTH, ARENA_HEIGHT, GRID_SIZE,
     BLACK, DARK_BG, GRID_COLOR,
-    NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_YELLOW, NEON_ORANGE,
+    NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_YELLOW, NEON_ORANGE, NEON_GREEN,
     UPGRADES,
     SHOCKWAVE_RADIUS, SHOCKWAVE_PUSHBACK,
     REFLEX_DURATION,
     SPEED_BOOST_MULT,
     BOSS_SLAM_DAMAGE,
+    SLIME_BOSS_SHOCKWAVE_DAMAGE,
 )
 from .obstacles import generate_obstacles, PowerUpManager
 from .config import Config, resource_path
@@ -91,6 +92,7 @@ class Game:
         self.obstacles = []
         self.powerup_manager = None
         self.ghost_trails = []  # [(x, y, lifetime, damage, radius)]
+        self.toxic_pools = []   # [(x, y, lifetime, damage, radius)] for SlimeBoss
 
         # Upgrade state
         self.upgrade_options = []
@@ -285,6 +287,7 @@ class Game:
         self.obstacles = generate_obstacles()
         self.powerup_manager = PowerUpManager(self.obstacles, self.particles)
         self.ghost_trails = []
+        self.toxic_pools = []
         self.upgrade_options = []
         self.pending_levelups = 0
         self.state = GameState.PLAYING
@@ -548,6 +551,27 @@ class Game:
                         enemy.take_damage(tdmg * dt, self.particles)
         self.ghost_trails = new_trails
 
+        # ── SlimeBoss Toxic Pool handling ──
+        # Collect toxic pools from any active SlimeBoss
+        boss = self.enemy_manager.active_boss
+        if boss and hasattr(boss, 'toxic_pools') and boss.toxic_pools:
+            self.toxic_pools.extend(boss.toxic_pools)
+            boss.toxic_pools.clear()
+
+        # Update toxic pools and damage player
+        new_toxic = []
+        for tx, ty, tlife, tdmg, tradius in self.toxic_pools:
+            tlife -= dt
+            if tlife > 0:
+                new_toxic.append((tx, ty, tlife, tdmg, tradius))
+                # Damage player if touching the pool
+                pdx = self.player.pos_x - tx
+                pdy = self.player.pos_y - ty
+                pdist = math.sqrt(pdx * pdx + pdy * pdy)
+                if pdist < tradius + self.player.radius:
+                    self.player.take_damage(tdmg)
+        self.toxic_pools = new_toxic
+
         # ── Dash-end effects ──
         if self.player.dash_ended_this_frame:
             px = self.player.dash_end_x
@@ -653,10 +677,16 @@ class Game:
                 if dist < enemy.radius + self.player.radius:
                     self.player.take_damage(enemy.damage)
 
-        # Boss slam damage
+        # Boss slam damage (works for Boss, SniperBoss, SlimeBoss)
         for enemy in self.enemies:
             if hasattr(enemy, 'is_boss') and enemy.is_boss and enemy.slam_hit_player:
-                self.player.take_damage(BOSS_SLAM_DAMAGE)
+                # Use SlimeBoss-specific shockwave damage if applicable
+                from .enemies import SlimeBoss as _SlimeBoss
+                if isinstance(enemy, _SlimeBoss):
+                    slam_dmg = SLIME_BOSS_SHOCKWAVE_DAMAGE
+                else:
+                    slam_dmg = BOSS_SLAM_DAMAGE
+                self.player.take_damage(slam_dmg)
                 self.particles.emit_explosion(
                     self.player.pos_x, self.player.pos_y,
                     color=NEON_YELLOW, count=20)
@@ -691,6 +721,17 @@ class Game:
                     pygame.draw.circle(trail_surf, (*NEON_ORANGE, alpha),
                                        (tr, tr), tr)
                     surface.blit(trail_surf, (tsx - tr, tsy - tr))
+
+            # SlimeBoss toxic pools (green)
+            for tx, ty, tlife, tdmg, tradius in self.toxic_pools:
+                tsx, tsy = self.camera.apply(tx, ty)
+                tr = self.camera.s(tradius)
+                alpha = min(120, int(120 * (tlife / 3.0)))
+                if tr > 0 and alpha > 0:
+                    pool_surf = pygame.Surface((tr * 2, tr * 2), pygame.SRCALPHA)
+                    pygame.draw.circle(pool_surf, (*NEON_GREEN, alpha),
+                                       (tr, tr), tr)
+                    surface.blit(pool_surf, (tsx - tr, tsy - tr))
 
             for enemy in self.enemies:
                 enemy.draw(surface, self.camera)

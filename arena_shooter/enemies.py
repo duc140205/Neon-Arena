@@ -1,5 +1,5 @@
 """
-enemies.py - Enemy types: Chaser, Shooter, Tank
+enemies.py - Enemy types: Chaser, Shooter, Tank, Boss, SniperBoss, SlimeBoss
 All drawing uses camera.s() for native-resolution rendering.
 """
 
@@ -12,6 +12,7 @@ from .settings import (
     SHOOTER_FIRE_RATE, SHOOTER_BULLET_SPEED, SHOOTER_PREFERRED_DIST,
     TANK_SPEED, TANK_HP, TANK_SIZE, TANK_DAMAGE, TANK_XP, TANK_COLOR,
     NEON_RED, NEON_ORANGE, NEON_PURPLE, NEON_CYAN, NEON_YELLOW, NEON_MAGENTA, WHITE,
+    NEON_GREEN,
     ARENA_WIDTH, ARENA_HEIGHT,
     CHASER_BURST_CHANCE, CHASER_BURST_SPEED_MULT, CHASER_BURST_DURATION,
     SHOOTER_FAN_BULLET_COUNT, SHOOTER_FAN_SPREAD,
@@ -20,6 +21,17 @@ from .settings import (
     BOSS_CHARGE_SPEED_MULT, BOSS_CHARGE_DURATION, BOSS_CHARGE_COOLDOWN,
     BOSS_SLAM_RADIUS, BOSS_SLAM_DAMAGE, BOSS_SLAM_COOLDOWN,
     BOSS_MINION_COUNT, BOSS_MINION_COOLDOWN,
+    SNIPER_BOSS_SPEED, SNIPER_BOSS_HP, SNIPER_BOSS_SIZE, SNIPER_BOSS_DAMAGE,
+    SNIPER_BOSS_XP, SNIPER_BOSS_COLOR, SNIPER_BOSS_PREFERRED_DIST,
+    SNIPER_BOSS_FIRE_RATE, SNIPER_BOSS_BULLET_SPEED,
+    SNIPER_BOSS_RING_COOLDOWN, SNIPER_BOSS_RING_BULLET_COUNT,
+    SNIPER_BOSS_RING_BULLET_SPEED,
+    SLIME_BOSS_SPEED, SLIME_BOSS_HP, SLIME_BOSS_SIZE, SLIME_BOSS_DAMAGE,
+    SLIME_BOSS_XP, SLIME_BOSS_COLOR,
+    SLIME_BOSS_TRAIL_DAMAGE, SLIME_BOSS_TRAIL_INTERVAL,
+    SLIME_BOSS_TRAIL_LIFETIME, SLIME_BOSS_TRAIL_RADIUS,
+    SLIME_BOSS_JUMP_COOLDOWN, SLIME_BOSS_JUMP_SPEED, SLIME_BOSS_JUMP_DURATION,
+    SLIME_BOSS_SHOCKWAVE_RADIUS, SLIME_BOSS_SHOCKWAVE_DAMAGE,
 )
 from .projectiles import EnemyBullet
 
@@ -526,3 +538,296 @@ class Boss(Enemy):
                 pygame.draw.circle(slam_surf, (*NEON_YELLOW, ring_alpha),
                                    (slam_r, slam_r), slam_r, max(1, sc(3)))
                 surface.blit(slam_surf, (sx - slam_r, sy - slam_r))
+
+
+class SniperBoss(Enemy):
+    """Long-range boss that fires high-speed laser shots and periodic ring attacks."""
+
+    def __init__(self, x, y, hp_multiplier=1.0, speed_multiplier=1.0, damage_multiplier=1.0):
+        super().__init__(
+            x, y,
+            speed=SNIPER_BOSS_SPEED * speed_multiplier,
+            hp=int(SNIPER_BOSS_HP * hp_multiplier),
+            size=SNIPER_BOSS_SIZE,
+            damage=int(SNIPER_BOSS_DAMAGE * damage_multiplier),
+            xp=SNIPER_BOSS_XP,
+            color=SNIPER_BOSS_COLOR,
+        )
+        self.is_boss = True
+        self.preferred_dist = SNIPER_BOSS_PREFERRED_DIST
+
+        # Laser shot
+        self.fire_timer = SNIPER_BOSS_FIRE_RATE * 0.5
+        self.fire_rate = SNIPER_BOSS_FIRE_RATE
+
+        # Ring of Death
+        self.ring_timer = SNIPER_BOSS_RING_COOLDOWN
+        self.ring_anim_timer = 0.0
+        self.ring_active = False
+
+        # Slam/minion compatibility fields (expected by game.py)
+        self.slam_hit_player = False
+        self.pending_minions = []
+
+    def update(self, dt, player_x, player_y, enemy_bullets=None):
+        dx = player_x - self.pos_x
+        dy = player_y - self.pos_y
+        dist = math.sqrt(dx * dx + dy * dy)
+        ndx = dx / dist if dist > 0 else 0
+        ndy = dy / dist if dist > 0 else 0
+
+        self.slam_hit_player = False
+
+        # Movement: try to maintain preferred distance
+        if dist < self.preferred_dist - 50:
+            # Too close — back away
+            self.pos_x -= ndx * self.speed * 1.3 * dt
+            self.pos_y -= ndy * self.speed * 1.3 * dt
+        elif dist > self.preferred_dist + 80:
+            # Too far — approach slowly
+            self.pos_x += ndx * self.speed * 0.5 * dt
+            self.pos_y += ndy * self.speed * 0.5 * dt
+        else:
+            # Strafe at ideal distance
+            strafe = math.sin(pygame.time.get_ticks() * 0.002 + self.wobble_offset)
+            self.pos_x += (-ndy * strafe) * self.speed * dt
+            self.pos_y += (ndx * strafe) * self.speed * dt
+
+        # Laser shot
+        self.fire_timer -= dt
+        if self.fire_timer <= 0 and enemy_bullets is not None:
+            self.fire_timer = self.fire_rate
+            angle = math.atan2(dy, dx)
+            bullet = EnemyBullet(
+                self.pos_x, self.pos_y, angle,
+                SNIPER_BOSS_BULLET_SPEED, self.damage,
+                color=NEON_CYAN, size=6,
+            )
+            enemy_bullets.add(bullet)
+
+        # Ring of Death
+        self.ring_timer -= dt
+        if self.ring_active:
+            self.ring_anim_timer -= dt
+            if self.ring_anim_timer <= 0:
+                self.ring_active = False
+        elif self.ring_timer <= 0 and enemy_bullets is not None:
+            self.ring_timer = SNIPER_BOSS_RING_COOLDOWN
+            self.ring_active = True
+            self.ring_anim_timer = 0.3
+            # Fire bullets in a full circle
+            for i in range(SNIPER_BOSS_RING_BULLET_COUNT):
+                angle = (i / SNIPER_BOSS_RING_BULLET_COUNT) * math.pi * 2
+                bullet = EnemyBullet(
+                    self.pos_x, self.pos_y, angle,
+                    SNIPER_BOSS_RING_BULLET_SPEED, self.damage,
+                    color=NEON_CYAN, size=5,
+                )
+                enemy_bullets.add(bullet)
+
+        super().update(dt, player_x, player_y)
+
+    def _draw_shape(self, surface, sx, sy, color, camera):
+        """Draw as a diamond/crosshair with a sniper reticle aesthetic."""
+        r = camera.s(self.radius)
+        sc = camera.s
+
+        # Pulsing outer aura
+        pulse = 0.7 + 0.3 * math.sin(pygame.time.get_ticks() * 0.006)
+        aura_r = int(r * 1.5 * pulse)
+        if aura_r > 0:
+            aura_surf = pygame.Surface((aura_r * 2, aura_r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(aura_surf, (*NEON_CYAN, 30),
+                               (aura_r, aura_r), aura_r)
+            surface.blit(aura_surf, (sx - aura_r, sy - aura_r))
+
+        # Diamond body
+        points = [
+            (sx, sy - r),
+            (sx + r, sy),
+            (sx, sy + r),
+            (sx - r, sy),
+        ]
+        pygame.draw.polygon(surface, color, points, max(1, sc(2)))
+
+        # Inner fill
+        pad = r + sc(2)
+        inner_surf = pygame.Surface((pad * 2, pad * 2), pygame.SRCALPHA)
+        shifted = [(p[0] - sx + pad, p[1] - sy + pad) for p in points]
+        pygame.draw.polygon(inner_surf, (*color, 50), shifted)
+        surface.blit(inner_surf, (sx - pad, sy - pad))
+
+        # Crosshair lines
+        line_len = int(r * 0.7)
+        line_w = max(1, sc(1))
+        pygame.draw.line(surface, color, (sx - line_len, sy), (sx + line_len, sy), line_w)
+        pygame.draw.line(surface, color, (sx, sy - line_len), (sx, sy + line_len), line_w)
+
+        # Core dot
+        core_r = max(1, r // 4)
+        pygame.draw.circle(surface, WHITE, (sx, sy), core_r)
+
+        # Ring of Death animation
+        if self.ring_active:
+            ring_progress = 1.0 - (self.ring_anim_timer / 0.3)
+            ring_r = int(r * 2.5 * ring_progress)
+            if ring_r > 0:
+                ring_surf = pygame.Surface((ring_r * 2, ring_r * 2), pygame.SRCALPHA)
+                ring_alpha = int(180 * (1.0 - ring_progress))
+                pygame.draw.circle(ring_surf, (*NEON_CYAN, ring_alpha),
+                                   (ring_r, ring_r), ring_r, max(1, sc(2)))
+                surface.blit(ring_surf, (sx - ring_r, sy - ring_r))
+
+
+class SlimeBoss(Enemy):
+    """Area-denial boss that leaves toxic trail and jumps to create shockwaves."""
+
+    def __init__(self, x, y, hp_multiplier=1.0, speed_multiplier=1.0, damage_multiplier=1.0):
+        super().__init__(
+            x, y,
+            speed=SLIME_BOSS_SPEED * speed_multiplier,
+            hp=int(SLIME_BOSS_HP * hp_multiplier),
+            size=SLIME_BOSS_SIZE,
+            damage=int(SLIME_BOSS_DAMAGE * damage_multiplier),
+            xp=SLIME_BOSS_XP,
+            color=SLIME_BOSS_COLOR,
+        )
+        self.is_boss = True
+
+        # Toxic trail
+        self.trail_timer = 0.0
+        self.toxic_pools = []  # [(x, y, lifetime, damage, radius)] - managed by game.py
+
+        # Jump attack
+        self.jump_cooldown_timer = SLIME_BOSS_JUMP_COOLDOWN * 0.6
+        self.jump_timer = 0.0
+        self.is_jumping = False
+        self.jump_vx = 0.0
+        self.jump_vy = 0.0
+        self.base_speed = self.speed
+
+        # Shockwave signal (read by game.py)
+        self.slam_hit_player = False
+        self.shockwave_anim_timer = 0.0
+        self.shockwave_active = False
+        self.pending_minions = []
+
+    def update(self, dt, player_x, player_y, enemy_bullets=None):
+        dx = player_x - self.pos_x
+        dy = player_y - self.pos_y
+        dist = math.sqrt(dx * dx + dy * dy)
+        ndx = dx / dist if dist > 0 else 0
+        ndy = dy / dist if dist > 0 else 0
+
+        self.slam_hit_player = False
+
+        # Jump attack
+        if self.is_jumping:
+            self.jump_timer -= dt
+            self.pos_x += self.jump_vx * dt
+            self.pos_y += self.jump_vy * dt
+            if self.jump_timer <= 0:
+                self.is_jumping = False
+                self.jump_cooldown_timer = SLIME_BOSS_JUMP_COOLDOWN
+                # Landing shockwave
+                self.shockwave_active = True
+                self.shockwave_anim_timer = 0.4
+                # Check if player is in shockwave range
+                land_dx = player_x - self.pos_x
+                land_dy = player_y - self.pos_y
+                land_dist = math.sqrt(land_dx * land_dx + land_dy * land_dy)
+                if land_dist < SLIME_BOSS_SHOCKWAVE_RADIUS:
+                    self.slam_hit_player = True
+        else:
+            # Normal slow movement toward player
+            self.pos_x += ndx * self.speed * dt
+            self.pos_y += ndy * self.speed * dt
+
+            # Jump cooldown
+            self.jump_cooldown_timer -= dt
+            if self.jump_cooldown_timer <= 0 and dist < 800:
+                self.is_jumping = True
+                self.jump_timer = SLIME_BOSS_JUMP_DURATION
+                self.jump_vx = ndx * SLIME_BOSS_JUMP_SPEED
+                self.jump_vy = ndy * SLIME_BOSS_JUMP_SPEED
+
+        # Shockwave animation
+        if self.shockwave_active:
+            self.shockwave_anim_timer -= dt
+            if self.shockwave_anim_timer <= 0:
+                self.shockwave_active = False
+
+        # Toxic trail: leave pools while moving (not during jump)
+        if not self.is_jumping:
+            self.trail_timer -= dt
+            if self.trail_timer <= 0:
+                self.trail_timer = SLIME_BOSS_TRAIL_INTERVAL
+                self.toxic_pools.append((
+                    self.pos_x, self.pos_y,
+                    SLIME_BOSS_TRAIL_LIFETIME,
+                    SLIME_BOSS_TRAIL_DAMAGE,
+                    SLIME_BOSS_TRAIL_RADIUS,
+                ))
+
+        super().update(dt, player_x, player_y)
+
+    def _draw_shape(self, surface, sx, sy, color, camera):
+        """Draw as a blob/slime shape with dripping effect."""
+        r = camera.s(self.radius)
+        sc = camera.s
+
+        # Pulsing aura (toxic glow)
+        pulse = 0.6 + 0.4 * math.sin(pygame.time.get_ticks() * 0.004)
+        aura_r = int(r * 1.6 * pulse)
+        if aura_r > 0:
+            aura_surf = pygame.Surface((aura_r * 2, aura_r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(aura_surf, (*NEON_GREEN, 35),
+                               (aura_r, aura_r), aura_r)
+            surface.blit(aura_surf, (sx - aura_r, sy - aura_r))
+
+        # Main blob body — use a wobbly circle approximation
+        t = pygame.time.get_ticks() * 0.003
+        points = []
+        num_pts = 12
+        for i in range(num_pts):
+            angle = (i / num_pts) * math.pi * 2
+            wobble = 1.0 + 0.12 * math.sin(t + angle * 3)
+            if self.is_jumping:
+                wobble *= 0.85  # squash during jump
+            px = sx + math.cos(angle) * r * wobble
+            py = sy + math.sin(angle) * r * wobble
+            points.append((int(px), int(py)))
+
+        draw_color = WHITE if self.is_jumping else color
+        pygame.draw.polygon(surface, draw_color, points, max(1, sc(2)))
+
+        # Inner fill
+        pad = r + sc(4)
+        inner_surf = pygame.Surface((pad * 2, pad * 2), pygame.SRCALPHA)
+        shifted = [(p[0] - sx + pad, p[1] - sy + pad) for p in points]
+        alpha = 90 if self.is_jumping else 50
+        pygame.draw.polygon(inner_surf, (*color, alpha), shifted)
+        surface.blit(inner_surf, (sx - pad, sy - pad))
+
+        # Eyes (two dots)
+        eye_dist = max(1, r // 3)
+        eye_r = max(1, r // 6)
+        for sign in (-1, 1):
+            ex = sx + sign * eye_dist
+            ey = sy - eye_dist // 2
+            pygame.draw.circle(surface, WHITE, (int(ex), int(ey)), eye_r)
+            # Pupil
+            pupil_r = max(1, eye_r // 2)
+            pygame.draw.circle(surface, (20, 20, 20), (int(ex), int(ey)), pupil_r)
+
+        # Shockwave ring animation
+        if self.shockwave_active:
+            sw_progress = 1.0 - (self.shockwave_anim_timer / 0.4)
+            sw_r = int(camera.s(SLIME_BOSS_SHOCKWAVE_RADIUS) * sw_progress)
+            if sw_r > 0:
+                sw_surf = pygame.Surface((sw_r * 2, sw_r * 2), pygame.SRCALPHA)
+                sw_alpha = int(150 * (1.0 - sw_progress))
+                pygame.draw.circle(sw_surf, (*NEON_GREEN, sw_alpha),
+                                   (sw_r, sw_r), sw_r, max(1, sc(3)))
+                surface.blit(sw_surf, (sx - sw_r, sy - sw_r))
+

@@ -4,13 +4,14 @@ enemy_manager.py - Wave spawning and difficulty scaling
 
 import random
 import math
-from .enemies import Chaser, Shooter, Tank, Boss
+from .enemies import Chaser, Shooter, Tank, Boss, SniperBoss, SlimeBoss
 from .settings import (
     ARENA_WIDTH, ARENA_HEIGHT, SPAWN_MARGIN, SPAWN_MIN_DIST,
     WAVE_BREAK_TIME, SCREEN_WIDTH, SCREEN_HEIGHT,
     DIFFICULTY_HP_PER_LEVEL, DIFFICULTY_SPEED_PER_LEVEL,
     DIFFICULTY_DAMAGE_PER_LEVEL,
     BOSS_WAVE_INTERVAL, BOSS_SLAM_DAMAGE, BOSS_DIFFICULTY_BOOST,
+    SLIME_BOSS_SHOCKWAVE_DAMAGE,
 )
 
 
@@ -132,6 +133,7 @@ class EnemyManager:
 
         # Spawn boss minions
         if self.active_boss and self.active_boss.alive():
+            # Spawn boss minions (original Boss)
             if self.active_boss.pending_minions:
                 for mx, my in self.active_boss.pending_minions:
                     mx = max(30, min(ARENA_WIDTH - 30, mx))
@@ -139,6 +141,12 @@ class EnemyManager:
                     minion = Chaser(mx, my, 1.0, 1.0, 1.0)
                     enemy_group.add(minion)
                 self.active_boss.pending_minions.clear()
+
+            # Handle SlimeBoss toxic pools
+            if hasattr(self.active_boss, 'toxic_pools') and self.active_boss.toxic_pools:
+                # Transfer toxic pool data to game's ghost_trails system
+                # (game.py will pick them up via active_boss.toxic_pools)
+                pass  # toxic_pools stay on the boss; game.py reads them
 
         if self.wave_active:
             if self.enemies_alive == 0:
@@ -162,11 +170,14 @@ class EnemyManager:
         return False
 
     def _spawn_boss(self, enemy_group, player_x, player_y, camera_rect):
-        """Spawn a boss + a few escort enemies."""
+        """Spawn a random boss type + a few escort enemies."""
         x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
         wave_def = self._generate_wave(self.wave)
-        boss = Boss(x, y, wave_def.hp_mult, wave_def.speed_mult,
-                    wave_def.damage_mult)
+
+        # Randomly pick one of the three boss types
+        boss_class = random.choice([Boss, SniperBoss, SlimeBoss])
+        boss = boss_class(x, y, wave_def.hp_mult, wave_def.speed_mult,
+                          wave_def.damage_mult)
         enemy_group.add(boss)
         self.active_boss = boss
 

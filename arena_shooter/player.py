@@ -71,7 +71,7 @@ class Player(pygame.sprite.Sprite):
 
         # Invincibility
         self.invincible_timer = 0.0
-        self.invincible_duration = 0.5
+        self.invincible_duration = 1.0
         self.flash_timer = 0.0
 
         # Ghost Dash trail
@@ -267,9 +267,9 @@ class Player(pygame.sprite.Sprite):
             if count == 1:
                 angles = [self.aim_angle]
             else:
-                spread = 0.15 * (count - 1)
+                # 360-degree circular spray: evenly distribute bullets
                 angles = [
-                    self.aim_angle + spread * (i / (count - 1) - 0.5)
+                    self.aim_angle + (2 * math.pi / count) * i
                     for i in range(count)
                 ]
 
