@@ -1,0 +1,531 @@
+"""
+game.py - Game state machine and main game loop logic
+Renders at native resolution using camera.s() scaling.
+No logical surface — the game surface IS the display at full resolution.
+"""
+
+import pygame
+import math
+import random
+import os
+from .settings import (
+    SCREEN_WIDTH, SCREEN_HEIGHT, FPS, TITLE,
+    ARENA_WIDTH, ARENA_HEIGHT, GRID_SIZE,
+    BLACK, DARK_BG, GRID_COLOR,
+    NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_YELLOW,
+    UPGRADES,
+)
+from .config import Config
+from .player import Player
+from .particles import ParticleSystem
+from .camera import Camera
+from .enemy_manager import EnemyManager
+from .ui import UI
+from .settings_menu import SettingsMenu
+
+
+class GameState:
+    MENU = "menu"
+    PLAYING = "playing"
+    UPGRADE = "upgrade"
+    PAUSED = "paused"
+    GAME_OVER = "game_over"
+    SETTINGS = "settings"
+
+
+class Game:
+    """Main game class — renders directly at native resolution."""
+
+    def __init__(self):
+        pygame.init()
+        pygame.mixer.init()
+
+        # ── Config ───────────────────────────────────────
+        self.config = Config()
+
+        # ── Display ──────────────────────────────────────
+        self.screen = None
+        self.actual_width = SCREEN_WIDTH
+        self.actual_height = SCREEN_HEIGHT
+        self._apply_display_mode()
+
+        pygame.display.set_caption(TITLE)
+        self.clock = pygame.time.Clock()
+        self.running = True
+        self.state = GameState.MENU
+        self.time = 0.0
+        self.fps = 60.0
+
+        # ── Systems ──────────────────────────────────────
+        self.particles = ParticleSystem()
+        # Camera sized to actual display for native rendering
+        self.camera = Camera(self.actual_width, self.actual_height)
+        self.ui = UI(self.actual_width, self.actual_height)
+        self.enemy_manager = EnemyManager()
+        self.settings_menu = SettingsMenu()
+
+        # Vignette (at actual resolution)
+        self._vignette_surface = self._create_vignette()
+
+        # Sprite groups
+        self.player = None
+        self.enemies = pygame.sprite.Group()
+        self.player_bullets = pygame.sprite.Group()
+        self.enemy_bullets = pygame.sprite.Group()
+
+        # Upgrade state
+        self.upgrade_options = []
+        self.pending_levelups = 0
+
+        self._pre_settings_state = GameState.MENU
+
+        # Sound
+        self._init_sounds()
+
+    # ── Display Mode Management ──────────────────────────
+
+    def _apply_display_mode(self):
+        """Apply display settings — clean flag management."""
+        w = self.config.display_width
+        h = self.config.display_height
+        mode = self.config.screen_mode
+
+        # Step 1: Capture desktop resolution BEFORE any changes
+        info = pygame.display.Info()
+        desktop_w = info.current_w
+        desktop_h = info.current_h
+
+        # Step 2: Force-reset to clear lingering flags
+        try:
+            pygame.display.set_mode((640, 480), 0)
+        except Exception:
+            pass
+
+        # Step 3: Apply requested mode
+        if mode == "fullscreen":
+            flags = pygame.FULLSCREEN | pygame.HWSURFACE | pygame.DOUBLEBUF
+            self.screen = self._safe_set_mode((w, h), flags)
+
+        elif mode == "borderless":
+            os.environ['SDL_VIDEO_WINDOW_POS'] = '0,0'
+            flags = pygame.NOFRAME
+            self.screen = self._safe_set_mode((desktop_w, desktop_h), flags)
+
+        else:  # windowed
+            os.environ.pop('SDL_VIDEO_WINDOW_POS', None)
+            flags = pygame.RESIZABLE
+            self.screen = self._safe_set_mode((w, h), flags)
+
+        # Step 4: Read back ACTUAL size
+        self.actual_width, self.actual_height = self.screen.get_size()
+        scale = self.actual_width / 1280
+        print(f"[Display] mode={mode}, requested={w}x{h}, "
+              f"actual={self.actual_width}x{self.actual_height}, scale={scale:.2f}x")
+        pygame.display.set_caption(TITLE)
+
+    def _safe_set_mode(self, size, flags):
+        vsync_flag = 1 if self.config.vsync else 0
+        try:
+            return pygame.display.set_mode(size, flags, vsync=vsync_flag)
+        except TypeError:
+            return pygame.display.set_mode(size, flags)
+
+    def _on_resolution_changed(self):
+        """Rebuild resolution-dependent resources after a mode change."""
+        self.camera.resize(self.actual_width, self.actual_height)
+        self.ui = UI(self.actual_width, self.actual_height)
+        self._vignette_surface = self._create_vignette()
+
+    # ── Sound System ─────────────────────────────────────
+
+    def _init_sounds(self):
+        self.sounds = {}
+        try:
+            sample_rate = 44100
+            shoot_arr = pygame.sndarray.make_sound(
+                self._generate_beep(440, 0.05, sample_rate)
+            )
+            self.sounds["shoot"] = shoot_arr
+            self.sounds["shoot"].set_volume(0.15)
+        except Exception:
+            pass
+        try:
+            sample_rate = 44100
+            explode_arr = pygame.sndarray.make_sound(
+                self._generate_noise(0.1, sample_rate)
+            )
+            self.sounds["explode"] = explode_arr
+            self.sounds["explode"].set_volume(0.2)
+        except Exception:
+            pass
+        try:
+            sample_rate = 44100
+            levelup_arr = pygame.sndarray.make_sound(
+                self._generate_beep(880, 0.15, sample_rate)
+            )
+            self.sounds["levelup"] = levelup_arr
+            self.sounds["levelup"].set_volume(0.25)
+        except Exception:
+            pass
+
+    def _generate_beep(self, freq, duration, sample_rate=44100):
+        import numpy as np
+        t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+        wave = (np.sin(2 * np.pi * freq * t) * 16000).astype(np.int16)
+        fade = np.linspace(1, 0, len(wave))
+        wave = (wave * fade).astype(np.int16)
+        return np.column_stack((wave, wave))
+
+    def _generate_noise(self, duration, sample_rate=44100):
+        import numpy as np
+        samples = int(sample_rate * duration)
+        noise = (np.random.randint(-8000, 8000, samples)).astype(np.int16)
+        fade = np.linspace(1, 0, samples)
+        noise = (noise * fade).astype(np.int16)
+        return np.column_stack((noise, noise))
+
+    def _play_sound(self, name):
+        if name in self.sounds:
+            try:
+                self.sounds[name].play()
+            except Exception:
+                pass
+
+    # ── Background ───────────────────────────────────────
+
+    def _draw_background(self, surface):
+        """Draw arena background with cyberpunk grid, at native resolution."""
+        surface.fill(DARK_BG)
+        sc = self.camera.s
+
+        cam_x = int(self.camera.x)
+        cam_y = int(self.camera.y)
+
+        # Grid lines (scaled to native resolution)
+        start_x = int(-(cam_x % GRID_SIZE) * self.camera.scale)
+        step = sc(GRID_SIZE)
+        if step < 2:
+            step = 2
+        sw, sh = surface.get_size()
+
+        x = start_x
+        grid_idx = int(-cam_x // GRID_SIZE)
+        while x < sw + step:
+            if grid_idx % 4 == 0:
+                color = (30, 30, 70)
+            else:
+                color = GRID_COLOR
+            pygame.draw.line(surface, color, (x, 0), (x, sh))
+            x += step
+            grid_idx += 1
+
+        start_y = int(-(cam_y % GRID_SIZE) * self.camera.scale)
+        y = start_y
+        grid_idy = int(-cam_y // GRID_SIZE)
+        while y < sh + step:
+            if grid_idy % 4 == 0:
+                color = (30, 30, 70)
+            else:
+                color = GRID_COLOR
+            pygame.draw.line(surface, color, (0, y), (sw, y))
+            y += step
+            grid_idy += 1
+
+        # Arena border
+        border_rect = self.camera.apply_rect(
+            pygame.Rect(0, 0, ARENA_WIDTH, ARENA_HEIGHT)
+        )
+        pygame.draw.rect(surface, NEON_CYAN, border_rect, max(1, sc(2)))
+
+        # Vignette
+        surface.blit(self._vignette_surface, (0, 0))
+
+    def _create_vignette(self):
+        """Create vignette at actual display resolution."""
+        w, h = self.actual_width, self.actual_height
+        vignette = pygame.Surface((w, h), pygame.SRCALPHA)
+        edge_h = max(20, h // 18)
+        for i in range(edge_h):
+            alpha = int(60 * (1 - i / edge_h))
+            line_surf = pygame.Surface((w, 1), pygame.SRCALPHA)
+            line_surf.fill((0, 0, 10, alpha))
+            vignette.blit(line_surf, (0, i))
+            vignette.blit(line_surf, (0, h - 1 - i))
+        return vignette
+
+    # ── Game State Management ────────────────────────────
+
+    def new_game(self):
+        self.particles = ParticleSystem()
+        self.camera = Camera(self.actual_width, self.actual_height)
+        self.enemy_manager = EnemyManager()
+        self.enemies.empty()
+        self.player_bullets.empty()
+        self.enemy_bullets.empty()
+        self.player = Player(ARENA_WIDTH / 2, ARENA_HEIGHT / 2, self.particles)
+        self.upgrade_options = []
+        self.pending_levelups = 0
+        self.state = GameState.PLAYING
+
+    def _open_settings(self):
+        self._pre_settings_state = self.state
+        self.settings_menu.open(self.config)
+        self.state = GameState.SETTINGS
+
+    def _close_settings(self):
+        self.state = self._pre_settings_state
+
+    # ── Main Loop ────────────────────────────────────────
+
+    def run(self):
+        while self.running:
+            dt = self.clock.tick(self.config.fps) / 1000.0
+            dt = min(dt, 0.05)
+            self.time += dt
+            self.fps = self.clock.get_fps()
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                    return
+                self._handle_event(event)
+
+            self._update(dt)
+
+            # ── Draw directly to screen (NATIVE resolution) ──
+            self._draw(self.screen)
+
+            pygame.display.flip()
+
+        pygame.quit()
+
+    # ── Event Handling ───────────────────────────────────
+
+    def _handle_event(self, event):
+        # Handle window resize
+        if event.type == pygame.VIDEORESIZE:
+            self.actual_width, self.actual_height = event.w, event.h
+            self.screen = self._safe_set_mode((event.w, event.h), pygame.RESIZABLE)
+            self._on_resolution_changed()
+            return
+
+        # Settings menu — pass native events directly (rects are at native resolution)
+        if self.state == GameState.SETTINGS:
+            result = self.settings_menu.handle_event(event, self.config)
+            if result == "back":
+                self._close_settings()
+            elif result == "apply":
+                self._apply_display_mode()
+                self._on_resolution_changed()
+            return
+
+        if event.type == pygame.KEYDOWN:
+            if self.state == GameState.MENU:
+                if event.key == pygame.K_RETURN:
+                    self.new_game()
+                elif event.key == pygame.K_ESCAPE:
+                    self.running = False
+            elif self.state == GameState.PLAYING:
+                if event.key == pygame.K_ESCAPE:
+                    self.state = GameState.PAUSED
+            elif self.state == GameState.PAUSED:
+                if event.key == pygame.K_ESCAPE:
+                    self.state = GameState.PLAYING
+                elif event.key == pygame.K_r:
+                    self.new_game()
+                elif event.key == pygame.K_q:
+                    self.state = GameState.MENU
+            elif self.state == GameState.GAME_OVER:
+                if event.key == pygame.K_r:
+                    self.new_game()
+                elif event.key == pygame.K_ESCAPE:
+                    self.state = GameState.MENU
+
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            # Mouse pos is already in native pixels — use as-is for UI
+            # but scale to logical (1280x720) for settings_menu / ui hit-testing
+            logical_pos = self._to_logical(event.pos)
+
+            if self.state == GameState.MENU:
+                if event.button == 1:
+                    if hasattr(self.ui, 'menu_start_rect') and self.ui.menu_start_rect.collidepoint(event.pos):
+                        self.new_game()
+                    elif hasattr(self.ui, 'menu_settings_rect') and self.ui.menu_settings_rect.collidepoint(event.pos):
+                        self._open_settings()
+                    elif hasattr(self.ui, 'menu_quit_rect') and self.ui.menu_quit_rect.collidepoint(event.pos):
+                        self.running = False
+
+            elif self.state == GameState.UPGRADE:
+                if event.button == 1:
+                    choice = self.ui.get_upgrade_click(event.pos)
+                    if choice:
+                        self.player.apply_upgrade(choice)
+                        self._play_sound("levelup")
+                        self.pending_levelups -= 1
+                        if self.pending_levelups > 0:
+                            self._generate_upgrade_options()
+                        else:
+                            self.state = GameState.PLAYING
+
+    def _to_logical(self, pos):
+        """Convert native screen pos to logical 1280x720 coordinates."""
+        lx = pos[0] * SCREEN_WIDTH / self.actual_width
+        ly = pos[1] * SCREEN_HEIGHT / self.actual_height
+        return (int(lx), int(ly))
+
+    def _make_logical_event(self, event):
+        """Wrap a mouse event with logical-coordinate pos (for settings menu)."""
+        logical_pos = self._to_logical(event.pos)
+
+        class LogicalEvent:
+            pass
+
+        le = LogicalEvent()
+        le.type = event.type
+        le.pos = logical_pos
+        if hasattr(event, 'button'):
+            le.button = event.button
+        if hasattr(event, 'buttons'):
+            le.buttons = event.buttons
+        if hasattr(event, 'rel'):
+            le.rel = event.rel
+        if hasattr(event, 'key'):
+            le.key = event.key
+        return le
+
+    # ── Upgrade Generation ───────────────────────────────
+
+    def _generate_upgrade_options(self):
+        available = []
+        for key, data in UPGRADES.items():
+            if self.player.upgrade_levels.get(key, 0) < data["max_level"]:
+                available.append(key)
+        if not available:
+            self.state = GameState.PLAYING
+            return
+        count = min(3, len(available))
+        self.upgrade_options = random.sample(available, count)
+
+    # ── Update ───────────────────────────────────────────
+
+    def _update(self, dt):
+        if self.state == GameState.PLAYING:
+            self._update_playing(dt)
+        elif self.state == GameState.SETTINGS:
+            self.settings_menu.update(dt)
+
+    def _update_playing(self, dt):
+        # Mouse is in native screen pixels — pass directly
+        mouse_pos = pygame.mouse.get_pos()
+
+        self.player.update(dt, mouse_pos, self.camera)
+        if self.player.try_shoot(self.player_bullets):
+            self._play_sound("shoot")
+
+        self.camera.update(self.player.pos_x, self.player.pos_y, dt)
+
+        self.enemy_manager.update(
+            dt, self.enemies,
+            self.player.pos_x, self.player.pos_y,
+            self.camera.rect,
+        )
+
+        for enemy in self.enemies:
+            enemy.update(dt, self.player.pos_x, self.player.pos_y, self.enemy_bullets)
+
+        for bullet in self.player_bullets:
+            bullet.update(dt)
+        for bullet in self.enemy_bullets:
+            bullet.update(dt)
+
+        self.particles.update(dt)
+        self._check_collisions()
+
+        if not self.player.alive:
+            self.state = GameState.GAME_OVER
+            self.particles.emit_explosion(self.player.pos_x, self.player.pos_y, count=30)
+            self._play_sound("explode")
+
+    # ── Collisions ───────────────────────────────────────
+
+    def _check_collisions(self):
+        for bullet in list(self.player_bullets):
+            for enemy in list(self.enemies):
+                dx = bullet.pos_x - enemy.pos_x
+                dy = bullet.pos_y - enemy.pos_y
+                dist = math.sqrt(dx * dx + dy * dy)
+                if dist < bullet.radius + enemy.radius:
+                    killed = enemy.take_damage(bullet.damage, self.particles)
+                    bullet.kill()
+                    if killed:
+                        self._play_sound("explode")
+                        self.enemy_manager.on_enemy_killed()
+                        leveled = self.player.gain_xp(enemy.xp_value)
+                        if leveled:
+                            self.pending_levelups += 1
+                            self._generate_upgrade_options()
+                            self.state = GameState.UPGRADE
+                    break
+
+        if not self.player.is_dashing:
+            for bullet in list(self.enemy_bullets):
+                dx = bullet.pos_x - self.player.pos_x
+                dy = bullet.pos_y - self.player.pos_y
+                dist = math.sqrt(dx * dx + dy * dy)
+                if dist < bullet.radius + self.player.radius:
+                    self.player.take_damage(bullet.damage)
+                    bullet.kill()
+
+        if not self.player.is_dashing:
+            for enemy in self.enemies:
+                dx = enemy.pos_x - self.player.pos_x
+                dy = enemy.pos_y - self.player.pos_y
+                dist = math.sqrt(dx * dx + dy * dy)
+                if dist < enemy.radius + self.player.radius:
+                    self.player.take_damage(enemy.damage)
+
+    # ── Drawing ──────────────────────────────────────────
+
+    def _draw(self, surface):
+        if self.state == GameState.MENU:
+            self.ui.draw_main_menu(surface, self.time)
+            return
+
+        if self.state == GameState.SETTINGS:
+            self.settings_menu.draw(surface, self.time)
+            return
+
+        if self.state in (GameState.PLAYING, GameState.PAUSED,
+                          GameState.UPGRADE, GameState.GAME_OVER):
+            self._draw_background(surface)
+
+            for enemy in self.enemies:
+                enemy.draw(surface, self.camera)
+
+            for bullet in self.enemy_bullets:
+                bullet.draw(surface, self.camera)
+
+            for bullet in self.player_bullets:
+                bullet.draw(surface, self.camera)
+
+            if self.player:
+                self.player.draw(surface, self.camera)
+
+            self.particles.draw(surface, self.camera)
+
+            wave_info = self.enemy_manager.wave_info
+            self.ui.draw_hud(surface, self.player, wave_info, self.fps)
+
+            if wave_info["announcing"]:
+                self.ui.draw_wave_announcement(
+                    surface,
+                    wave_info["wave"],
+                    self.enemy_manager.wave_announcement_timer,
+                )
+
+            if self.state == GameState.PAUSED:
+                self.ui.draw_pause_menu(surface)
+            elif self.state == GameState.UPGRADE:
+                self.ui.draw_upgrade_screen(surface, self.upgrade_options, self.player)
+            elif self.state == GameState.GAME_OVER:
+                self.ui.draw_game_over(surface, self.player, wave_info)
