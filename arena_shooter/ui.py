@@ -607,7 +607,8 @@ class UI:
 
         trial_info dict keys:
             active, type, kills, target,
-            notification_timer, notification_text, failed
+            notification_timer, notification_text, failed,
+            timer, took_damage, easy_target
         """
         s = self._s
         W, H = self.W, self.H
@@ -638,25 +639,62 @@ class UI:
                              bg_rect, max(1, s(1)), border_radius=s(4))
             surface.blit(notif_surf, nr)
 
-        # Active trial progress bar (left side, below ult bar)
+        # Active trial progress panel (left side, below ult bar)
         if trial_info["active"]:
-            trial_y = H - s(110)
+            trial_y = H - s(118)
             trial_x = s(20)
-            trial_w = s(160)
-            trial_h = s(6)
+            trial_w = s(220)
+            trial_h = s(10)
 
-            progress = trial_info["kills"] / max(1, trial_info["target"])
+            kills = trial_info["kills"]
+            target = trial_info["target"]
+            easy_target = trial_info.get("easy_target", 5)
+            timer = trial_info.get("timer", 0)
+            took_damage = trial_info.get("took_damage", False)
+
+            # ── Timed path progress bar ──
+            timed_progress = kills / max(1, target)
+            # Outer border / glow
+            border_rect = pygame.Rect(trial_x - s(2), trial_y - s(2),
+                                      trial_w + s(4), trial_h + s(4))
+            glow_color = NEON_PURPLE if timer > 0 else NEON_RED
+            pygame.draw.rect(surface, glow_color, border_rect,
+                             max(1, s(1)), border_radius=s(4))
+            # Background
             self._draw_rounded_bar(surface, trial_x, trial_y,
                                    trial_w, trial_h, DARK_GRAY)
-            if progress > 0:
+            # Fill
+            if timed_progress > 0:
+                bar_color = NEON_PURPLE if timer > 0 else GRAY
                 self._draw_rounded_bar(surface, trial_x, trial_y,
-                                       int(trial_w * min(1.0, progress)),
-                                       trial_h, NEON_PURPLE)
+                                       int(trial_w * min(1.0, timed_progress)),
+                                       trial_h, bar_color)
 
-            trial_label = self.font_tiny.render(
-                f"TRIAL: {trial_info['kills']}/{trial_info['target']} kills (no damage)",
-                True, NEON_PURPLE)
-            surface.blit(trial_label, (trial_x, trial_y - s(14)))
+            # ── Timer label (top-left of bar) ──
+            timer_text = f"{timer:.1f}s" if timer > 0 else "TIME UP"
+            timer_color = NEON_CYAN if timer > 5 else (NEON_YELLOW if timer > 0 else NEON_RED)
+            timer_surf = self.font_small.render(timer_text, True, timer_color)
+            surface.blit(timer_surf, (trial_x + trial_w + s(6), trial_y - s(2)))
+
+            # ── Label above bar: dual-path status ──
+            timed_label = f"TIMED: {kills}/{target}"
+            if took_damage:
+                untouched_label = "UNTOUCHED: X"
+                untouched_color = NEON_RED
+            else:
+                untouched_label = f"UNTOUCHED: {kills}/{easy_target}"
+                untouched_color = NEON_GREEN
+
+            timed_surf = self.font_small.render(timed_label, True, NEON_PURPLE)
+            surface.blit(timed_surf, (trial_x, trial_y - s(20)))
+
+            sep_surf = self.font_small.render("  |  ", True, GRAY)
+            sep_x = trial_x + timed_surf.get_width()
+            surface.blit(sep_surf, (sep_x, trial_y - s(20)))
+
+            untouched_surf = self.font_small.render(untouched_label, True, untouched_color)
+            surface.blit(untouched_surf,
+                         (sep_x + sep_surf.get_width(), trial_y - s(20)))
 
     def _draw_rounded_bar(self, surface, x, y, w, h, color):
         if w <= 0:

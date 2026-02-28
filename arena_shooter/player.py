@@ -24,6 +24,7 @@ from .settings import (
     ULT_PULSE_RADIUS, ULT_PULSE_DAMAGE, ULT_PUSHBACK_FORCE,
     ULT_SLOW_DURATION, ULT_SLOW_FACTOR,
     ULT_TANK_INVINCIBILITY, ULT_TANK_PUSHBACK_MULT,
+    ULT_SPEED_BOOST_DURATION,
 )
 from .projectiles import PlayerBullet, RailgunBullet
 
@@ -116,6 +117,7 @@ class Player(pygame.sprite.Sprite):
         self.ult_charge = 0.0            # accumulated charge (0 .. ULT_COOLDOWN)
         self.ult_ready = False           # True when fully charged
         self.ult_active_timer = 0.0      # brief visual window after activation
+        self.ult_speed_boost_timer = 0.0 # movement speed boost after activation
         self.ult_upgrades = {'sniper': False, 'slime': False, 'tank': False}
         # Boss artifacts collected (keys: 'sniper', 'slime', 'tank')
         self.boss_artifacts = {'sniper': False, 'slime': False, 'tank': False}
@@ -138,6 +140,7 @@ class Player(pygame.sprite.Sprite):
         self.ult_charge = 0.0
         self.ult_active_timer = 0.5  # brief flash window
         self.ult_fired_this_frame = True
+        self.ult_speed_boost_timer = ULT_SPEED_BOOST_DURATION  # 30% speed boost
 
         # Tank augment: grant invincibility
         if self.ult_upgrades['tank']:

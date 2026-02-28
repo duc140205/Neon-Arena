@@ -148,7 +148,8 @@ TANK_COLOR = NEON_PURPLE
 # ── Wave Settings ────────────────────────────────────────
 WAVE_BREAK_TIME = 3.0       # seconds between waves
 SPAWN_MARGIN = 100          # min distance from screen edge for spawning
-SPAWN_MIN_DIST = 300        # min distance from player
+SPAWN_MIN_DIST = 500        # min distance from player (was 300)
+SPAWN_STAGGER_DELAY = 0.5   # seconds between each enemy spawn in a wave
 
 # ── XP / Leveling ───────────────────────────────────────
 BASE_XP_REQUIRED = 100
@@ -349,7 +350,14 @@ ULT_TANK_INVINCIBILITY = 4.0      # seconds of invincibility (tank augment)
 ULT_TANK_PUSHBACK_MULT = 2.5      # knockback multiplier (tank augment)
 
 # Trial challenge requirements
-TRIAL_KILL_TARGET = 10            # kills without taking damage
+TRIAL_KILL_TARGET = 10            # kills within time limit (timed path)
+TRIAL_EASY_KILL_TARGET = 5        # kills without taking damage (untouched path)
+TRIAL_TIME_LIMIT = 15.0           # seconds to complete the timed path
+TRIAL_START_INVINCIBILITY = 1.0   # invincibility bubble at trial start
+
+# Ult speed boost
+ULT_SPEED_BOOST_MULT = 1.3        # 30% movement speed during ultimate
+ULT_SPEED_BOOST_DURATION = 3.0    # seconds of speed boost after ult activation
 
 # ── Particles ────────────────────────────────────────────
 PARTICLE_GRAVITY = 0

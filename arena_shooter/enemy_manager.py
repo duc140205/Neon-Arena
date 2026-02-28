@@ -13,6 +13,7 @@ from .settings import (
     BOSS_WAVE_INTERVAL, BOSS_SLAM_DAMAGE, BOSS_DIFFICULTY_BOOST,
     SLIME_BOSS_SHOCKWAVE_DAMAGE,
     BOMBER_SPAWN_WAVE, SHIELD_GUARD_SPAWN_WAVE,
+    SPAWN_STAGGER_DELAY,
 )
 
 
@@ -53,6 +54,10 @@ class EnemyManager:
         # Boss tracking
         self.active_boss = None
         self.boss_wave = False
+
+        # Staggered spawn queue: list of (EnemyClass, hp_mult, speed_mult, damage_mult, extra_kwargs)
+        self._pending_spawns = []
+        self._spawn_stagger_timer = 0.0
 
     def set_difficulty(self, player_level):
         """Update difficulty based on player level."""
@@ -160,7 +165,17 @@ class EnemyManager:
                 pass  # toxic_pools stay on the boss; game.py reads them
 
         if self.wave_active:
-            if self.enemies_alive == 0:
+            # Drain the staggered spawn queue
+            if self._pending_spawns:
+                self._spawn_stagger_timer -= dt
+                if self._spawn_stagger_timer <= 0:
+                    cls, hp_m, spd_m, dmg_m, kwargs = self._pending_spawns.pop(0)
+                    x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
+                    enemy = cls(x, y, hp_m, spd_m, dmg_m, **kwargs)
+                    enemy_group.add(enemy)
+                    self._spawn_stagger_timer = SPAWN_STAGGER_DELAY
+
+            if self.enemies_alive == 0 and not self._pending_spawns:
                 self.wave_active = False
                 self.boss_wave = False
                 self.wave_timer = WAVE_BREAK_TIME
@@ -199,38 +214,30 @@ class EnemyManager:
                                    wave_def.damage_mult))
 
     def _spawn_wave(self, enemy_group, player_x, player_y, camera_rect):
-        """Spawn all enemies for the current wave."""
+        """Queue enemies for staggered spawning during the wave."""
         wave_def = self._generate_wave(self.wave)
 
+        queue = []
         for _ in range(wave_def.chasers):
-            x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
-            enemy = Chaser(x, y, wave_def.hp_mult, wave_def.speed_mult,
-                           wave_def.damage_mult)
-            enemy_group.add(enemy)
-
+            queue.append((Chaser, wave_def.hp_mult, wave_def.speed_mult,
+                          wave_def.damage_mult, {}))
         for _ in range(wave_def.shooters):
-            x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
-            enemy = Shooter(x, y, wave_def.hp_mult, wave_def.speed_mult,
-                            wave_def.damage_mult, wave_num=self.wave)
-            enemy_group.add(enemy)
-
+            queue.append((Shooter, wave_def.hp_mult, wave_def.speed_mult,
+                          wave_def.damage_mult, {"wave_num": self.wave}))
         for _ in range(wave_def.tanks):
-            x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
-            enemy = Tank(x, y, wave_def.hp_mult, wave_def.speed_mult,
-                         wave_def.damage_mult)
-            enemy_group.add(enemy)
-
+            queue.append((Tank, wave_def.hp_mult, wave_def.speed_mult,
+                          wave_def.damage_mult, {}))
         for _ in range(wave_def.bombers):
-            x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
-            enemy = SuicideBomber(x, y, wave_def.hp_mult, wave_def.speed_mult,
-                                  wave_def.damage_mult)
-            enemy_group.add(enemy)
-
+            queue.append((SuicideBomber, wave_def.hp_mult, wave_def.speed_mult,
+                          wave_def.damage_mult, {}))
         for _ in range(wave_def.guards):
-            x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
-            enemy = ShieldGuard(x, y, wave_def.hp_mult, wave_def.speed_mult,
-                                wave_def.damage_mult)
-            enemy_group.add(enemy)
+            queue.append((ShieldGuard, wave_def.hp_mult, wave_def.speed_mult,
+                          wave_def.damage_mult, {}))
+
+        # Shuffle so enemy types are interleaved
+        random.shuffle(queue)
+        self._pending_spawns = queue
+        self._spawn_stagger_timer = 0.0  # spawn one immediately
 
     def on_enemy_killed(self):
         """Called when an enemy is killed."""
