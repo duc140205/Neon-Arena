@@ -4,23 +4,26 @@ Entry point — DPI awareness MUST be set before any other imports.
 """
 
 # ── DPI Awareness (MUST be first, before pygame) ─────────
-# Without this, Windows scales the window at >100% DPI,
-# causing blurriness and incorrect resolution reporting.
+# Level 1 (System_DPI_Aware): Windows DPI-scales the app uniformly, so
+# pygame receives logical pixels and set_mode((1280,720)) produces a
+# genuine 1280×720 window on any DPI setting.
+# Level 2 (Per_Monitor) makes SDL work in physical pixels, which causes
+# a 1280×720 request to be rendered at 2560×1440 on a 200% DPI screen.
 import ctypes
 try:
-    # Per-monitor DPI awareness (best quality)
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)  # System_DPI_Aware
 except Exception:
     try:
-        # Fallback: system DPI aware
         ctypes.windll.user32.SetProcessDPIAware()
     except Exception:
         pass
 
 import os
-# Tell SDL to not use its own DPI scaling
+# Disable SDL2's built-in HiDPI surface scaling.
+# Without this, SDL may silently double the surface dimensions on HiDPI
+# displays even when DPI awareness is already handled by Windows.
+os.environ['SDL_VIDEO_HIGHDPI_DISABLED'] = '1'
 os.environ['SDL_VIDEO_ALLOW_SCREENSAVER'] = '1'
-os.environ.setdefault('SDL_HINT_VIDEO_HIGHDPI_DISABLED', '0')
 
 from arena_shooter.game import Game
 

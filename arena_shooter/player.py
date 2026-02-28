@@ -179,7 +179,21 @@ class Player(pygame.sprite.Sprite):
         self.reflex_timer = max(0, self.reflex_timer - dt)
         self.dash_ended_this_frame = False
 
-        keys = pygame.key.get_pressed()
+        # When the window is not focused (e.g. screenshot overlay is open),
+        # treat every key as released so the player doesn't drift forever.
+        # Timers, dash physics, particles, and enemy AI still update normally.
+        if pygame.key.get_focused():
+            keys = pygame.key.get_pressed()
+        else:
+            # Window lost focus (e.g. Win+Shift+S screenshot overlay).
+            # Return False for every key so the player stops moving, but
+            # all physics / timers / AI continue running in the background.
+            # A plain list won't work because SDL2 key constants (K_UP etc.)
+            # are very large integers; use a proxy that accepts any index.
+            class _NoKeys:
+                def __getitem__(self, _):
+                    return False
+            keys = _NoKeys()
 
         if self.is_dashing:
             self.dash_timer -= dt

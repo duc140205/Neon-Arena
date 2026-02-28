@@ -29,6 +29,9 @@ Every wave pushes the difficulty higher. Every level-up gives you a choice. How 
 ## 📸 Screenshot
 
 ![Neon Arena Gameplay](assets/mainmenu.png)
+![Neon Arena Gameplay](assets/gameplay1.jpg)
+![Neon Arena Gameplay](assets/levelup.jpg)
+![Neon Arena Gameplay](assets/end.jpg)
 
 ---
 

@@ -43,6 +43,11 @@ class Game:
     """Main game class — renders directly at native resolution."""
 
     def __init__(self):
+        # Centre the window before SDL creates it (checked at set_mode time).
+        # Must be set before pygame.init() to cover the initial window.
+        os.environ['SDL_VIDEO_CENTERED'] = '1'
+        os.environ.pop('SDL_VIDEO_WINDOW_POS', None)
+
         pygame.init()
         pygame.mixer.init()
 
@@ -106,43 +111,90 @@ class Game:
     # ── Display Mode Management ──────────────────────────
 
     def _apply_display_mode(self):
-        """Apply display settings — clean flag management."""
+        """Apply display settings — fully reliable windowed / fullscreen switch."""
         w = self.config.display_width
         h = self.config.display_height
         mode = self.config.screen_mode
 
-        # Step 1: Capture desktop resolution BEFORE any changes
-        info = pygame.display.Info()
-        desktop_w = info.current_w
-        desktop_h = info.current_h
-
-        # Step 2: Force-reset to clear lingering flags
+        # ── Step 1: Capture desktop geometry BEFORE tearing down the display.
+        # pygame.display.Info() returns garbage after display.quit().
         try:
-            pygame.display.set_mode((640, 480), 0)
+            info = pygame.display.Info()
+            desktop_w = info.current_w
+            desktop_h = info.current_h
+        except Exception:
+            desktop_w, desktop_h = 1920, 1080  # safe fallback
+
+        # ── Step 2: Set env vars BEFORE the display is recreated.
+        # SDL reads these at SDL_CreateWindow time.
+        if mode == "windowed":
+            os.environ['SDL_VIDEO_CENTERED'] = '1'
+            os.environ.pop('SDL_VIDEO_WINDOW_POS', None)
+            # Prevent SDL from auto-scaling the surface on HiDPI displays.
+            os.environ['SDL_VIDEO_HIGHDPI_DISABLED'] = '1'
+            # Clamp to logical desktop so the window never overflows.
+            if desktop_w > 0 and desktop_h > 0:
+                w = min(w, desktop_w)
+                h = min(h, desktop_h)
+            # ── Safety offset ──────────────────────────────────────────────
+            # When the requested resolution exactly matches the desktop size,
+            # Windows/SDL interprets a RESIZABLE window that fills the entire
+            # screen as borderless-fullscreen and forces it to stay that way.
+            # Subtracting a few pixels (2px width, 40px for the title bar)
+            # forces the OS to create a genuine decorated window.
+            if desktop_w > 0 and desktop_h > 0 and w == desktop_w and h == desktop_h:
+                w = max(640, w - 2)
+                h = max(480, h - 40)
+        else:  # fullscreen — SDL manages everything
+            os.environ.pop('SDL_VIDEO_CENTERED', None)
+            os.environ.pop('SDL_VIDEO_WINDOW_POS', None)
+            os.environ.pop('SDL_VIDEO_HIGHDPI_DISABLED', None)
+
+        # ── Step 3: Full display-subsystem teardown.
+        # The only reliable way to clear OS-level window styles (WS_POPUP for
+        # fullscreen, WS_THICKFRAME for resizable, etc.) on Windows.
+        try:
+            pygame.display.quit()
+            pygame.display.init()
         except Exception:
             pass
 
-        # Step 3: Apply requested mode
+        # ── Step 4: Buffer reset — create a tiny plain window AFTER teardown.
+        # Transitioning directly from "no window" → FULLSCREEN or RESIZABLE can
+        # leave stale driver state on some Windows/SDL2 combos.  A neutral
+        # 100×100 window anchors the plain windowed state first.
+        try:
+            pygame.display.set_mode((100, 100), 0)
+        except Exception:
+            pass
+
+        # ── Step 5: Re-assert centering immediately before the real set_mode.
+        # display.init() can internally reset SDL's hint cache on some drivers.
+        if mode == "windowed":
+            os.environ['SDL_VIDEO_CENTERED'] = '1'
+
+        # ── Step 6: Choose flags and create the final window.
         if mode == "fullscreen":
             flags = pygame.FULLSCREEN | pygame.HWSURFACE | pygame.DOUBLEBUF
-            self.screen = self._safe_set_mode((w, h), flags)
+        else:
+            # pygame.SHOWN makes the window visible immediately without any
+            # compositor hide/show flicker.  RESIZABLE only — no FULLSCREEN,
+            # no NOFRAME, no other flags that could confuse the WM.
+            flags = pygame.SHOWN | pygame.RESIZABLE
 
-        elif mode == "borderless":
-            os.environ['SDL_VIDEO_WINDOW_POS'] = '0,0'
-            flags = pygame.NOFRAME
-            self.screen = self._safe_set_mode((desktop_w, desktop_h), flags)
+        print(f"[Display] Applying mode={mode!r} | target={w}x{h} | "
+              f"desktop={desktop_w}x{desktop_h} | flags={flags:#010x}")
+        self.screen = self._safe_set_mode((w, h), flags)
 
-        else:  # windowed
-            os.environ.pop('SDL_VIDEO_WINDOW_POS', None)
-            flags = pygame.RESIZABLE
-            self.screen = self._safe_set_mode((w, h), flags)
-
-        # Step 4: Read back ACTUAL size
+        # ── Step 7: Read back the ACTUAL surface size.
         self.actual_width, self.actual_height = self.screen.get_size()
         scale = self.actual_width / 1280
-        print(f"[Display] mode={mode}, requested={w}x{h}, "
-              f"actual={self.actual_width}x{self.actual_height}, scale={scale:.2f}x")
+        print(f"[Display] Result: actual={self.actual_width}x{self.actual_height}, "
+              f"scale={scale:.2f}x")
         pygame.display.set_caption(TITLE)
+
+        # Force the OS / compositor to acknowledge the new window state.
+        pygame.display.flip()
 
     def _safe_set_mode(self, size, flags):
         vsync_flag = 1 if self.config.vsync else 0
@@ -304,8 +356,9 @@ class Game:
 
     def run(self):
         while self.running:
-            dt = self.clock.tick(self.config.fps) / 1000.0
-            dt = min(dt, 0.05)
+            # Clamp dt to 33 ms max so a long screenshot pause never causes
+            # a physics "jump" when focus returns to the window.
+            dt = min(self.clock.tick(self.config.fps) / 1000.0, 0.033)
             self.time += dt
             self.fps = self.clock.get_fps()
 
@@ -327,6 +380,18 @@ class Game:
     # ── Event Handling ───────────────────────────────────
 
     def _handle_event(self, event):
+        # ── Focus / visibility events – never pause the game ──────────────────
+        # pygame.ACTIVEEVENT fires when the window gains or loses focus.
+        #   event.gain == 0  → window lost focus (e.g. screenshot tool opened)
+        #   event.state == 6 → window minimised / hidden
+        # We intentionally ignore these so the game keeps running while the
+        # user is capturing a screenshot with Ctrl+Shift+S.
+        if event.type == pygame.ACTIVEEVENT:
+            return
+        # SDL2 sends WINDOWFOCUSLOST instead of ACTIVEEVENT; also ignore it.
+        if event.type == pygame.WINDOWFOCUSLOST:
+            return
+
         # Handle window resize
         if event.type == pygame.VIDEORESIZE:
             self.actual_width, self.actual_height = event.w, event.h
@@ -342,6 +407,7 @@ class Game:
             elif result == "apply":
                 self._apply_display_mode()
                 self._on_resolution_changed()
+                pygame.event.clear()  # discard stale resize/activate events
             return
 
         if event.type == pygame.KEYDOWN:

@@ -59,7 +59,7 @@ RESOLUTION_OPTIONS = [
     (2560, 1440),
 ]
 
-SCREEN_MODE_OPTIONS = ["windowed", "fullscreen", "borderless"]
+SCREEN_MODE_OPTIONS = ["windowed", "fullscreen"]
 
 FPS_OPTIONS = [30, 60, 120, 144, 240]
 
