@@ -10,6 +10,7 @@ from .settings import (
     PLAYER_BULLET_SPEED, PLAYER_BULLET_DAMAGE, PLAYER_BULLET_SIZE,
     DASH_SPEED, DASH_DURATION, DASH_COOLDOWN, DASH_PARTICLES, DASH_DECAY_DURATION,
     NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_ORANGE, NEON_YELLOW, NEON_BLUE, WHITE,
+    NEON_PURPLE,
     ARENA_WIDTH, ARENA_HEIGHT,
     BASE_XP_REQUIRED, XP_SCALE_FACTOR,
     GHOST_TRAIL_INTERVAL, GHOST_TRAIL_LIFETIME, GHOST_TRAIL_RADIUS,
@@ -19,6 +20,10 @@ from .settings import (
     REFLEX_FIRE_RATE_MULT, REFLEX_DURATION,
     SHOTGUN_CONE_ANGLE,
     RAILGUN_DURATION, RAILGUN_BULLET_SPEED, RAILGUN_DAMAGE_MULT, RAILGUN_SIZE,
+    ULT_COOLDOWN, ULT_CHARGE_PER_KILL,
+    ULT_PULSE_RADIUS, ULT_PULSE_DAMAGE, ULT_PUSHBACK_FORCE,
+    ULT_SLOW_DURATION, ULT_SLOW_FACTOR,
+    ULT_TANK_INVINCIBILITY, ULT_TANK_PUSHBACK_MULT,
 )
 from .projectiles import PlayerBullet, RailgunBullet
 
@@ -106,6 +111,48 @@ class Player(pygame.sprite.Sprite):
 
         # Shooting state flag (cleared when focus is lost)
         self.is_shooting = False
+
+        # ── Ultimate: Neon Pulse ──
+        self.ult_charge = 0.0            # accumulated charge (0 .. ULT_COOLDOWN)
+        self.ult_ready = False           # True when fully charged
+        self.ult_active_timer = 0.0      # brief visual window after activation
+        self.ult_upgrades = {'sniper': False, 'slime': False, 'tank': False}
+        # Boss artifacts collected (keys: 'sniper', 'slime', 'tank')
+        self.boss_artifacts = {'sniper': False, 'slime': False, 'tank': False}
+        # Signal for game.py to process the pulse this frame
+        self.ult_fired_this_frame = False
+
+    def gain_ult_charge(self, amount=None):
+        """Add charge toward the ultimate. Called on enemy kills."""
+        if amount is None:
+            amount = ULT_CHARGE_PER_KILL
+        self.ult_charge = min(ULT_COOLDOWN, self.ult_charge + amount)
+        if self.ult_charge >= ULT_COOLDOWN:
+            self.ult_ready = True
+
+    def try_activate_ultimate(self):
+        """Attempt to fire the Neon Pulse. Returns True if activated."""
+        if not self.ult_ready:
+            return False
+        self.ult_ready = False
+        self.ult_charge = 0.0
+        self.ult_active_timer = 0.5  # brief flash window
+        self.ult_fired_this_frame = True
+
+        # Tank augment: grant invincibility
+        if self.ult_upgrades['tank']:
+            self.invincible_timer = max(self.invincible_timer, ULT_TANK_INVINCIBILITY)
+
+        # Visual: emit the radial blast particles
+        augmented = any(self.ult_upgrades.values())
+        self.particles.emit_neon_pulse(
+            self.pos_x, self.pos_y, ULT_PULSE_RADIUS, augmented=augmented)
+        return True
+
+    @property
+    def ult_charge_ratio(self):
+        """0.0 to 1.0 charge progress."""
+        return min(1.0, self.ult_charge / ULT_COOLDOWN)
 
     def take_damage(self, amount):
         if self.invincible_timer > 0 or self.is_dashing:
@@ -197,6 +244,8 @@ class Player(pygame.sprite.Sprite):
         self.reflex_timer = max(0, self.reflex_timer - dt)
         self.railgun_timer = max(0, self.railgun_timer - dt)
         self.dash_ended_this_frame = False
+        self.ult_fired_this_frame = False
+        self.ult_active_timer = max(0, self.ult_active_timer - dt)
 
         keys = pygame.key.get_pressed()
 
@@ -495,6 +544,28 @@ class Player(pygame.sprite.Sprite):
                 pygame.draw.circle(ref_surf, (220, 230, 255, ref_alpha),
                                    (ref_r, ref_r), ref_r, max(1, sc(1)))
                 surface.blit(ref_surf, (sx - ref_r, sy - ref_r))
+
+        # ── Neon Pulse active flash ──
+        if self.ult_active_timer > 0:
+            pulse_progress = self.ult_active_timer / 0.5
+            ult_r = r + sc(int(30 * (1.0 - pulse_progress)))
+            ult_alpha = int(120 * pulse_progress)
+            if ult_r > 0 and ult_alpha > 0:
+                ult_surf = pygame.Surface((ult_r * 2, ult_r * 2), pygame.SRCALPHA)
+                pygame.draw.circle(ult_surf, (*NEON_PURPLE, ult_alpha),
+                                   (ult_r, ult_r), ult_r)
+                surface.blit(ult_surf, (sx - ult_r, sy - ult_r))
+
+        # ── Ultimate ready indicator (pulsing ring) ──
+        if self.ult_ready:
+            ult_pulse = 0.6 + 0.4 * math.sin(pygame.time.get_ticks() * 0.01)
+            ready_r = r + sc(16)
+            ready_alpha = int(80 * ult_pulse)
+            if ready_r > 0:
+                ready_surf = pygame.Surface((ready_r * 2, ready_r * 2), pygame.SRCALPHA)
+                pygame.draw.circle(ready_surf, (*NEON_PURPLE, ready_alpha),
+                                   (ready_r, ready_r), ready_r, max(1, sc(2)))
+                surface.blit(ready_surf, (sx - ready_r, sy - ready_r))
 
     @property
     def alive(self):

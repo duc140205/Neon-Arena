@@ -330,6 +330,27 @@ UPGRADES = {
     },
 }
 
+# ── Ultimate Skill: Neon Pulse ───────────────────────────
+ULT_COOLDOWN = 45.0               # seconds between ultimate uses
+ULT_CHARGE_PER_KILL = 5.0         # charge gained per enemy kill (out of ULT_COOLDOWN)
+ULT_PULSE_RADIUS = 350            # base radius of the radial blast
+ULT_PULSE_DAMAGE = 60             # base damage to enemies in radius
+ULT_PUSHBACK_FORCE = 600          # pushback speed applied to enemies
+ULT_SLOW_DURATION = 3.0           # seconds enemies are slowed
+ULT_SLOW_FACTOR = 0.4             # enemy speed multiplied by this while slowed
+ULT_LASER_COUNT = 6               # auto-aiming lasers (sniper augment)
+ULT_LASER_DAMAGE = 40             # damage per laser
+ULT_LASER_SPEED = 1400            # laser projectile speed
+ULT_TOXIC_POOL_COUNT = 8          # toxic pools left (slime augment)
+ULT_TOXIC_POOL_DAMAGE = 8         # damage per tick from toxic pool
+ULT_TOXIC_POOL_LIFETIME = 4.0     # seconds toxic pool lasts
+ULT_TOXIC_POOL_RADIUS = 30        # radius of each toxic pool
+ULT_TANK_INVINCIBILITY = 4.0      # seconds of invincibility (tank augment)
+ULT_TANK_PUSHBACK_MULT = 2.5      # knockback multiplier (tank augment)
+
+# Trial challenge requirements
+TRIAL_KILL_TARGET = 10            # kills without taking damage
+
 # ── Particles ────────────────────────────────────────────
 PARTICLE_GRAVITY = 0
 MAX_PARTICLES = 500

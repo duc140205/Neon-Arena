@@ -12,7 +12,7 @@ from .settings import (
     SHOOTER_FIRE_RATE, SHOOTER_BULLET_SPEED, SHOOTER_PREFERRED_DIST,
     TANK_SPEED, TANK_HP, TANK_SIZE, TANK_DAMAGE, TANK_XP, TANK_COLOR,
     NEON_RED, NEON_ORANGE, NEON_PURPLE, NEON_CYAN, NEON_YELLOW, NEON_MAGENTA, WHITE,
-    NEON_GREEN,
+    NEON_GREEN, NEON_BLUE,
     ARENA_WIDTH, ARENA_HEIGHT,
     CHASER_BURST_CHANCE, CHASER_BURST_SPEED_MULT, CHASER_BURST_DURATION,
     SHOOTER_FAN_BULLET_COUNT, SHOOTER_FAN_SPREAD,
@@ -63,6 +63,10 @@ class Enemy(pygame.sprite.Sprite):
         self.wobble_offset = random.uniform(0, math.pi * 2)
         self.wobble_speed = random.uniform(2, 4)
 
+        # Slow debuff (from Neon Pulse ultimate)
+        self.slow_timer = 0.0
+        self.slow_factor = 1.0  # 1.0 = normal speed
+
     def take_damage(self, amount, particle_system):
         self.hp -= amount
         self.flash_timer = 0.1
@@ -76,8 +80,19 @@ class Enemy(pygame.sprite.Sprite):
                                  speed_range=(40, 120), lifetime_range=(0.1, 0.3))
         return False
 
+    def apply_slow(self, duration, factor):
+        """Apply a slow debuff. Lower factor = slower."""
+        self.slow_timer = max(self.slow_timer, duration)
+        self.slow_factor = min(self.slow_factor, factor)
+
     def update(self, dt, player_x, player_y, enemy_bullets=None):
         self.flash_timer = max(0, self.flash_timer - dt)
+        # Update slow debuff
+        if self.slow_timer > 0:
+            self.slow_timer -= dt
+            if self.slow_timer <= 0:
+                self.slow_timer = 0.0
+                self.slow_factor = 1.0
         self.pos_x = max(self.radius, min(ARENA_WIDTH - self.radius, self.pos_x))
         self.pos_y = max(self.radius, min(ARENA_HEIGHT - self.radius, self.pos_y))
         self.rect.centerx = int(self.pos_x)
@@ -106,6 +121,16 @@ class Enemy(pygame.sprite.Sprite):
 
         # Shape (subclass override)
         self._draw_shape(surface, sx, sy, color, camera)
+
+        # Slow effect indicator (blue tint overlay)
+        if self.slow_timer > 0:
+            slow_r = sc(self.radius + 4)
+            if slow_r > 0:
+                slow_alpha = int(60 * min(1.0, self.slow_timer / 1.0))
+                slow_surf = pygame.Surface((slow_r * 2, slow_r * 2), pygame.SRCALPHA)
+                pygame.draw.circle(slow_surf, (*NEON_BLUE, slow_alpha),
+                                   (slow_r, slow_r), slow_r)
+                surface.blit(slow_surf, (sx - slow_r, sy - slow_r))
 
         # HP bar (only if damaged)
         if self.hp < self.max_hp:
@@ -171,7 +196,7 @@ class Chaser(Enemy):
         perp_x = -dy * wobble
         perp_y = dx * wobble
 
-        move_speed = self.speed
+        move_speed = self.speed * self.slow_factor
         self.pos_x += (dx + perp_x) * move_speed * dt
         self.pos_y += (dy + perp_y) * move_speed * dt
         super().update(dt, player_x, player_y)
@@ -232,16 +257,17 @@ class Shooter(Enemy):
         else:
             ndx, ndy = 0, 0
 
+        effective_speed = self.speed * self.slow_factor
         if dist > self.preferred_dist + 30:
-            self.pos_x += ndx * self.speed * dt
-            self.pos_y += ndy * self.speed * dt
+            self.pos_x += ndx * effective_speed * dt
+            self.pos_y += ndy * effective_speed * dt
         elif dist < self.preferred_dist - 30:
-            self.pos_x -= ndx * self.speed * dt
-            self.pos_y -= ndy * self.speed * dt
+            self.pos_x -= ndx * effective_speed * dt
+            self.pos_y -= ndy * effective_speed * dt
         else:
             strafe = math.sin(pygame.time.get_ticks() * 0.002 + self.wobble_offset)
-            self.pos_x += (-ndy * strafe) * self.speed * dt
-            self.pos_y += (ndx * strafe) * self.speed * dt
+            self.pos_x += (-ndy * strafe) * effective_speed * dt
+            self.pos_y += (ndx * strafe) * effective_speed * dt
 
         self.fire_timer -= dt
         if self.fire_timer <= 0 and enemy_bullets is not None:
@@ -350,10 +376,11 @@ class Tank(Enemy):
                 self.shield_timer = TANK_SHIELD_DURATION
 
         # Movement (charge or walk)
+        effective_speed = self.speed * self.slow_factor
         if self.is_charging:
             self.charge_duration -= dt
-            self.pos_x += self.charge_vx * dt
-            self.pos_y += self.charge_vy * dt
+            self.pos_x += self.charge_vx * self.slow_factor * dt
+            self.pos_y += self.charge_vy * self.slow_factor * dt
             if self.charge_duration <= 0:
                 self.is_charging = False
                 self.charge_timer = 2.0 + random.uniform(0, 1.5)
@@ -361,8 +388,8 @@ class Tank(Enemy):
             if dist > 0:
                 ndx = dx / dist
                 ndy = dy / dist
-                self.pos_x += ndx * self.speed * dt
-                self.pos_y += ndy * self.speed * dt
+                self.pos_x += ndx * effective_speed * dt
+                self.pos_y += ndy * effective_speed * dt
 
             self.charge_timer -= dt
             if self.charge_timer <= 0 and dist < 400:

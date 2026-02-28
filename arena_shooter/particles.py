@@ -225,6 +225,57 @@ class ParticleSystem:
             p.init(x, y, vx, vy, random.uniform(0.5, 1.0),
                    bright, random.uniform(3, 5), fade=True, shrink=False)
 
+    def emit_neon_pulse(self, x, y, radius, augmented=False):
+        """Radial blast ring for the Neon Pulse ultimate ability.
+
+        Creates a dramatic expanding ring of particles with inner burst.
+        If augmented is True, uses brighter colors and more particles.
+        """
+        ring_count = 48 if augmented else 32
+        burst_count = 30 if augmented else 20
+
+        # Expanding ring (particles move outward at ring edge)
+        for i in range(ring_count):
+            angle = (i / ring_count) * math.pi * 2
+            # Place particles along the ring at ~60% radius, moving outward
+            start_dist = radius * 0.3
+            px = x + math.cos(angle) * start_dist
+            py = y + math.sin(angle) * start_dist
+            speed = random.uniform(250, 500)
+            p = self._get_particle()
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            color = random.choice([NEON_CYAN, NEON_MAGENTA, NEON_PURPLE])
+            if augmented:
+                color = random.choice([NEON_CYAN, NEON_MAGENTA, NEON_YELLOW, NEON_PURPLE])
+            p.init(px, py, vx, vy, random.uniform(0.5, 1.2),
+                   color, random.uniform(4, 9))
+
+        # Inner dense starburst
+        for _ in range(burst_count):
+            angle = random.uniform(0, math.pi * 2)
+            speed = random.uniform(100, 350)
+            p = self._get_particle()
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            color = random.choice([NEON_CYAN, NEON_MAGENTA])
+            bright = (
+                min(255, color[0] + 100),
+                min(255, color[1] + 100),
+                min(255, color[2] + 100),
+            )
+            p.init(x, y, vx, vy, random.uniform(0.3, 0.8),
+                   bright, random.uniform(3, 6))
+
+        # Flash ring at full radius
+        for i in range(16):
+            angle = (i / 16) * math.pi * 2
+            px = x + math.cos(angle) * radius
+            py = y + math.sin(angle) * radius
+            p = self._get_particle()
+            p.init(px, py, 0, 0, random.uniform(0.3, 0.6),
+                   NEON_CYAN, random.uniform(5, 10), fade=True, shrink=True)
+
     def update(self, dt):
         for p in self.pool:
             if p.active:

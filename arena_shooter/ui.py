@@ -11,7 +11,7 @@ from .settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT,
     ARENA_WIDTH, ARENA_HEIGHT,
     NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_YELLOW, NEON_GREEN, NEON_PURPLE, NEON_RED,
-    NEON_ORANGE,
+    NEON_ORANGE, NEON_BLUE,
     WHITE, BLACK, DARK_BG, GRAY, DARK_GRAY,
     HP_BAR, HP_BAR_BG, XP_BAR, XP_BAR_BG,
     UPGRADES,
@@ -555,6 +555,108 @@ class UI:
         )
         hint_rect = hint.get_rect(center=(W // 2, H // 2 + self._s(60)))
         surface.blit(hint, hint_rect)
+
+    def draw_ult_bar(self, surface, player):
+        """Draw the ultimate charge bar below the dash cooldown indicator."""
+        s = self._s
+        H = self.H
+
+        ult_y = H - s(80)
+        ult_x = s(20)
+        ult_w = s(120)
+        ult_h = s(8)
+
+        ratio = player.ult_charge_ratio
+        self._draw_rounded_bar(surface, ult_x, ult_y, ult_w, ult_h, DARK_GRAY)
+
+        if ratio > 0:
+            if ratio >= 1.0:
+                # Pulsing purple when ready
+                pulse = 0.7 + 0.3 * abs(math.sin(pygame.time.get_ticks() * 0.008))
+                fill_color = (
+                    int(min(255, NEON_PURPLE[0] * pulse)),
+                    int(min(255, NEON_PURPLE[1] * pulse)),
+                    int(min(255, NEON_PURPLE[2] * pulse)),
+                )
+            else:
+                fill_color = NEON_PURPLE
+            self._draw_rounded_bar(surface, ult_x, ult_y,
+                                   int(ult_w * ratio), ult_h, fill_color)
+
+        label_color = NEON_PURPLE if ratio >= 1.0 else GRAY
+        ult_label = self.font_tiny.render(
+            "ULT [Q] READY!" if ratio >= 1.0 else "ULT [Q]",
+            True, label_color)
+        surface.blit(ult_label, (ult_x, ult_y - s(16)))
+
+        # Show augmentation icons if any are unlocked
+        aug_x = ult_x + ult_w + s(8)
+        aug_icons = []
+        if player.ult_upgrades.get('sniper'):
+            aug_icons.append(("S", NEON_CYAN))
+        if player.ult_upgrades.get('slime'):
+            aug_icons.append(("T", NEON_GREEN))
+        if player.ult_upgrades.get('tank'):
+            aug_icons.append(("K", NEON_ORANGE))
+        for i, (icon, color) in enumerate(aug_icons):
+            icon_surf = self.font_tiny.render(icon, True, color)
+            surface.blit(icon_surf, (aug_x + i * s(14), ult_y - s(2)))
+
+    def draw_trial_progress(self, surface, trial_info):
+        """Draw the Trial Progress notification panel.
+
+        trial_info dict keys:
+            active, type, kills, target,
+            notification_timer, notification_text, failed
+        """
+        s = self._s
+        W, H = self.W, self.H
+
+        # Notification banner (top-center, below boss bar area)
+        if trial_info["notification_timer"] > 0:
+            alpha = min(255, int(trial_info["notification_timer"] * 200))
+            text = trial_info["notification_text"]
+
+            if "COMPLETE" in text:
+                text_color = NEON_GREEN
+            elif "FAILED" in text:
+                text_color = NEON_RED
+            else:
+                text_color = NEON_PURPLE
+
+            notif_surf = self.font_medium.render(text, True, text_color)
+            notif_surf.set_alpha(alpha)
+            nr = notif_surf.get_rect(center=(W // 2, s(70)))
+            # Background panel
+            pad = s(10)
+            bg_rect = pygame.Rect(nr.left - pad, nr.top - pad // 2,
+                                  nr.width + pad * 2, nr.height + pad)
+            bg_surf = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
+            bg_surf.fill((15, 5, 25, min(180, int(alpha * 0.7))))
+            surface.blit(bg_surf, bg_rect.topleft)
+            pygame.draw.rect(surface, (*text_color, min(200, alpha)),
+                             bg_rect, max(1, s(1)), border_radius=s(4))
+            surface.blit(notif_surf, nr)
+
+        # Active trial progress bar (left side, below ult bar)
+        if trial_info["active"]:
+            trial_y = H - s(110)
+            trial_x = s(20)
+            trial_w = s(160)
+            trial_h = s(6)
+
+            progress = trial_info["kills"] / max(1, trial_info["target"])
+            self._draw_rounded_bar(surface, trial_x, trial_y,
+                                   trial_w, trial_h, DARK_GRAY)
+            if progress > 0:
+                self._draw_rounded_bar(surface, trial_x, trial_y,
+                                       int(trial_w * min(1.0, progress)),
+                                       trial_h, NEON_PURPLE)
+
+            trial_label = self.font_tiny.render(
+                f"TRIAL: {trial_info['kills']}/{trial_info['target']} kills (no damage)",
+                True, NEON_PURPLE)
+            surface.blit(trial_label, (trial_x, trial_y - s(14)))
 
     def _draw_rounded_bar(self, surface, x, y, w, h, color):
         if w <= 0:

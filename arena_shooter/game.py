@@ -22,12 +22,19 @@ from .settings import (
     COMBO_WINDOW, SCORE_MULTIPLIER,
     COMBO_TIER1_THRESHOLD, COMBO_TIER2_THRESHOLD,
     BOMBER_EXPLOSION_RADIUS, BOMBER_DAMAGE,
+    ULT_PULSE_RADIUS, ULT_PULSE_DAMAGE, ULT_PUSHBACK_FORCE,
+    ULT_SLOW_DURATION, ULT_SLOW_FACTOR,
+    ULT_LASER_COUNT, ULT_LASER_DAMAGE, ULT_LASER_SPEED,
+    ULT_TOXIC_POOL_COUNT, ULT_TOXIC_POOL_DAMAGE,
+    ULT_TOXIC_POOL_LIFETIME, ULT_TOXIC_POOL_RADIUS,
+    ULT_TANK_PUSHBACK_MULT,
+    TRIAL_KILL_TARGET,
 )
 from .obstacles import generate_obstacles, PowerUpManager
 from .config import Config, resource_path, assets
 from .player import Player
-from .projectiles import RailgunBullet
-from .enemies import ShieldGuard, SuicideBomber
+from .projectiles import RailgunBullet, LaserBullet
+from .enemies import ShieldGuard, SuicideBomber, Boss, SniperBoss, SlimeBoss
 from .particles import ParticleSystem
 from .camera import Camera
 from .enemy_manager import EnemyManager
@@ -117,6 +124,15 @@ class Game:
         # new interactive element (menu button or upgrade card).
         self._last_hovered_id: str | None = None   # last element that triggered hover sound
         self._prev_draw_state: str | None = None   # detect state transitions
+
+        # ── Trial Mode (Ultimate Skill Challenges) ───────
+        self.trial_active = False
+        self.trial_type = None         # 'sniper', 'slime', or 'tank'
+        self.trial_kills = 0           # kills without taking damage
+        self.trial_target = TRIAL_KILL_TARGET
+        self.trial_failed = False
+        self.trial_notification_timer = 0.0  # shows "Trial Started/Failed/Complete" text
+        self.trial_notification_text = ""
 
         # Sound
         self._init_sounds()
@@ -426,6 +442,14 @@ class Game:
         self.combo_timer = 0.0
         self.combo_display_timer = 0.0   # cosmetic pulse timer
 
+        # Trial state reset
+        self.trial_active = False
+        self.trial_type = None
+        self.trial_kills = 0
+        self.trial_failed = False
+        self.trial_notification_timer = 0.0
+        self.trial_notification_text = ""
+
         self.state = GameState.PLAYING
 
     def _open_settings(self):
@@ -523,6 +547,10 @@ class Game:
             elif self.state == GameState.PLAYING:
                 if event.key == pygame.K_ESCAPE:
                     self.state = GameState.PAUSED
+                elif event.key == pygame.K_q:
+                    # Activate ultimate ability
+                    if self.player and self.player.try_activate_ultimate():
+                        self._play_sound("explode")
             elif self.state == GameState.PAUSED:
                 if event.key == pygame.K_ESCAPE:
                     self.state = GameState.PLAYING
@@ -659,7 +687,8 @@ class Game:
                 pdy = self.player.pos_y - ey
                 pdist = math.sqrt(pdx * pdx + pdy * pdy)
                 if pdist < BOMBER_EXPLOSION_RADIUS + self.player.radius:
-                    self.player.take_damage(enemy.damage)
+                    if self.player.take_damage(enemy.damage):
+                        self._on_trial_damage()
                 # AOE damage to other enemies caught in the blast
                 for other in list(self.enemies):
                     if other is enemy:
@@ -775,7 +804,8 @@ class Game:
                 pdy = self.player.pos_y - ty
                 pdist = math.sqrt(pdx * pdx + pdy * pdy)
                 if pdist < tradius + self.player.radius:
-                    self.player.take_damage(tdmg)
+                    if self.player.take_damage(tdmg):
+                        self._on_trial_damage()
         self.toxic_pools = new_toxic
 
         # ── Dash-end effects ──
@@ -835,6 +865,14 @@ class Game:
                     self.player.bullets_phased += 1
                     bullet.kill()  # consume the bullet
 
+        # ── Neon Pulse Ultimate Effects ──
+        if self.player.ult_fired_this_frame:
+            self._process_neon_pulse()
+
+        # ── Trial notification timer ──
+        if self.trial_notification_timer > 0:
+            self.trial_notification_timer -= dt
+
         self.particles.update(dt)
         self._check_collisions()
 
@@ -852,6 +890,136 @@ class Game:
             self.state = GameState.GAME_OVER
             self.particles.emit_explosion(self.player.pos_x, self.player.pos_y, count=30)
             self._play_sound("explode")
+
+    # ── Neon Pulse (Ultimate) ────────────────────────────
+
+    def _process_neon_pulse(self):
+        """Apply the Neon Pulse radial blast and all augmentations."""
+        px, py = self.player.pos_x, self.player.pos_y
+        radius = ULT_PULSE_RADIUS
+        pushback = ULT_PUSHBACK_FORCE
+
+        # Tank augment: massive knockback
+        if self.player.ult_upgrades['tank']:
+            pushback *= ULT_TANK_PUSHBACK_MULT
+
+        # Base effect: damage + pushback + slow all enemies in radius
+        for enemy in list(self.enemies):
+            edx = enemy.pos_x - px
+            edy = enemy.pos_y - py
+            edist = math.sqrt(edx * edx + edy * edy)
+            if edist < radius and edist > 0:
+                # Pushback
+                nx = edx / edist
+                ny = edy / edist
+                enemy.pos_x += nx * pushback * 0.15
+                enemy.pos_y += ny * pushback * 0.15
+                # Damage
+                enemy.take_damage(ULT_PULSE_DAMAGE, self.particles)
+                # 3-second slow
+                enemy.apply_slow(ULT_SLOW_DURATION, ULT_SLOW_FACTOR)
+
+        # Destroy enemy bullets in radius
+        for bullet in list(self.enemy_bullets):
+            bdx = bullet.pos_x - px
+            bdy = bullet.pos_y - py
+            if math.sqrt(bdx * bdx + bdy * bdy) < radius:
+                bullet.kill()
+
+        # Sniper augment: fire auto-aiming lasers at nearest enemies
+        if self.player.ult_upgrades['sniper']:
+            targets = []
+            for enemy in self.enemies:
+                edx = enemy.pos_x - px
+                edy = enemy.pos_y - py
+                edist = math.sqrt(edx * edx + edy * edy)
+                targets.append((edist, enemy))
+            targets.sort(key=lambda t: t[0])
+            for i in range(min(ULT_LASER_COUNT, len(targets))):
+                _, target = targets[i]
+                angle = math.atan2(target.pos_y - py, target.pos_x - px)
+                laser = LaserBullet(px, py, angle, ULT_LASER_SPEED, ULT_LASER_DAMAGE)
+                self.player_bullets.add(laser)
+
+        # Slime augment: leave toxic pools in a ring
+        if self.player.ult_upgrades['slime']:
+            for i in range(ULT_TOXIC_POOL_COUNT):
+                angle = (i / ULT_TOXIC_POOL_COUNT) * math.pi * 2
+                pool_dist = radius * 0.6
+                pool_x = px + math.cos(angle) * pool_dist
+                pool_y = py + math.sin(angle) * pool_dist
+                self.toxic_pools.append((
+                    pool_x, pool_y,
+                    ULT_TOXIC_POOL_LIFETIME,
+                    ULT_TOXIC_POOL_DAMAGE,
+                    ULT_TOXIC_POOL_RADIUS,
+                ))
+                self.particles.emit(pool_x, pool_y, NEON_GREEN, count=6,
+                                    speed_range=(20, 60),
+                                    lifetime_range=(0.3, 0.6),
+                                    size_range=(3, 6))
+
+    # ── Trial Mode (Challenge System) ────────────────────
+
+    def _start_trial(self, trial_type):
+        """Begin a trial challenge for unlocking an ultimate augmentation."""
+        self.trial_active = True
+        self.trial_type = trial_type
+        self.trial_kills = 0
+        self.trial_failed = False
+        self.trial_notification_timer = 3.0
+        self.trial_notification_text = f"TRIAL: {trial_type.upper()} — Kill {self.trial_target} without taking damage!"
+
+    def _on_trial_kill(self):
+        """Called when an enemy is killed during an active trial."""
+        if not self.trial_active or self.trial_failed:
+            return
+        self.trial_kills += 1
+        if self.trial_kills >= self.trial_target:
+            # Trial complete — unlock augmentation
+            self.player.ult_upgrades[self.trial_type] = True
+            self.trial_active = False
+            self.trial_notification_timer = 4.0
+            self.trial_notification_text = f"TRIAL COMPLETE! {self.trial_type.upper()} AUGMENT UNLOCKED!"
+            self._play_sound("levelup")
+            # Celebration particles
+            self.particles.emit_neon_pulse(
+                self.player.pos_x, self.player.pos_y,
+                200, augmented=True)
+
+    def _on_trial_damage(self):
+        """Called when the player takes damage during an active trial."""
+        if not self.trial_active or self.trial_failed:
+            return
+        self.trial_failed = True
+        self.trial_active = False
+        self.trial_kills = 0
+        self.trial_notification_timer = 3.0
+        self.trial_notification_text = "TRIAL FAILED! Defeat another boss for a new artifact."
+
+    def _award_boss_artifact(self, boss):
+        """Award a boss artifact based on the boss type, then start the trial."""
+        # Determine which artifact to grant based on boss class
+        if isinstance(boss, SniperBoss):
+            artifact_type = 'sniper'
+        elif isinstance(boss, SlimeBoss):
+            artifact_type = 'slime'
+        else:  # Boss (tank-type)
+            artifact_type = 'tank'
+
+        # Only award if the augment isn't already unlocked
+        if self.player.ult_upgrades[artifact_type]:
+            return  # already unlocked
+
+        if not self.player.boss_artifacts[artifact_type]:
+            self.player.boss_artifacts[artifact_type] = True
+            self.trial_notification_timer = 4.0
+            self.trial_notification_text = (
+                f"BOSS ARTIFACT: {artifact_type.upper()} — "
+                f"Press [Q] near enemies, then complete the trial!"
+            )
+            # Start the trial immediately
+            self._start_trial(artifact_type)
 
     # ── Collisions ───────────────────────────────────────
 
@@ -922,6 +1090,15 @@ class Game:
 
                         self._play_sound("explode")
                         self.enemy_manager.on_enemy_killed()
+
+                        # Ultimate charge on kill
+                        self.player.gain_ult_charge()
+                        # Trial progress
+                        self._on_trial_kill()
+                        # Boss artifact drop
+                        if hasattr(enemy, 'is_boss') and enemy.is_boss:
+                            self._award_boss_artifact(enemy)
+
                         leveled = self.player.gain_xp(enemy.xp_value)
                         if leveled:
                             self.pending_levelups += 1
@@ -939,7 +1116,8 @@ class Game:
                 dy = bullet.pos_y - self.player.pos_y
                 dist = math.sqrt(dx * dx + dy * dy)
                 if dist < bullet.radius + self.player.radius:
-                    self.player.take_damage(bullet.damage)
+                    if self.player.take_damage(bullet.damage):
+                        self._on_trial_damage()
                     bullet.kill()
 
         if not self.player.is_dashing:
@@ -948,18 +1126,19 @@ class Game:
                 dy = enemy.pos_y - self.player.pos_y
                 dist = math.sqrt(dx * dx + dy * dy)
                 if dist < enemy.radius + self.player.radius:
-                    self.player.take_damage(enemy.damage)
+                    if self.player.take_damage(enemy.damage):
+                        self._on_trial_damage()
 
         # Boss slam damage (works for Boss, SniperBoss, SlimeBoss)
         for enemy in self.enemies:
             if hasattr(enemy, 'is_boss') and enemy.is_boss and enemy.slam_hit_player:
                 # Use SlimeBoss-specific shockwave damage if applicable
-                from .enemies import SlimeBoss as _SlimeBoss
-                if isinstance(enemy, _SlimeBoss):
+                if isinstance(enemy, SlimeBoss):
                     slam_dmg = SLIME_BOSS_SHOCKWAVE_DAMAGE
                 else:
                     slam_dmg = BOSS_SLAM_DAMAGE
                 self.player.take_damage(slam_dmg)
+                self._on_trial_damage()
                 self.particles.emit_explosion(
                     self.player.pos_x, self.player.pos_y,
                     color=NEON_YELLOW, count=20)
@@ -1047,6 +1226,22 @@ class Game:
 
             # Boss HP bar
             self.ui.draw_boss_hp_bar(surface, wave_info)
+
+            # Ultimate charge bar
+            self.ui.draw_ult_bar(surface, self.player)
+
+            # Trial progress notification
+            if self.trial_active or self.trial_notification_timer > 0:
+                trial_info = {
+                    "active": self.trial_active,
+                    "type": self.trial_type,
+                    "kills": self.trial_kills,
+                    "target": self.trial_target,
+                    "notification_timer": self.trial_notification_timer,
+                    "notification_text": self.trial_notification_text,
+                    "failed": self.trial_failed,
+                }
+                self.ui.draw_trial_progress(surface, trial_info)
 
             if wave_info["announcing"]:
                 self.ui.draw_wave_announcement(
