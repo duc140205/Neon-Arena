@@ -9,7 +9,8 @@ from .settings import (
     PLAYER_SPEED, PLAYER_SIZE, PLAYER_MAX_HP, PLAYER_FIRE_RATE,
     PLAYER_BULLET_SPEED, PLAYER_BULLET_DAMAGE, PLAYER_BULLET_SIZE,
     DASH_SPEED, DASH_DURATION, DASH_COOLDOWN, DASH_PARTICLES, DASH_DECAY_DURATION,
-    NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_ORANGE, NEON_YELLOW, WHITE,
+    NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_ORANGE, NEON_YELLOW, NEON_BLUE, WHITE,
+    NEON_PURPLE,
     ARENA_WIDTH, ARENA_HEIGHT,
     BASE_XP_REQUIRED, XP_SCALE_FACTOR,
     GHOST_TRAIL_INTERVAL, GHOST_TRAIL_LIFETIME, GHOST_TRAIL_RADIUS,
@@ -17,8 +18,14 @@ from .settings import (
     SHIELD_DURATION, DOUBLE_DAMAGE_DURATION,
     SPEED_BOOST_DURATION, SPEED_BOOST_MULT,
     REFLEX_FIRE_RATE_MULT, REFLEX_DURATION,
+    SHOTGUN_CONE_ANGLE,
+    RAILGUN_DURATION, RAILGUN_BULLET_SPEED, RAILGUN_DAMAGE_MULT, RAILGUN_SIZE,
+    ULT_COOLDOWN, ULT_CHARGE_PER_KILL,
+    ULT_PULSE_RADIUS, ULT_PULSE_DAMAGE, ULT_PUSHBACK_FORCE,
+    ULT_SLOW_DURATION, ULT_SLOW_FACTOR,
+    ULT_TANK_INVINCIBILITY, ULT_TANK_PUSHBACK_MULT,
 )
-from .projectiles import PlayerBullet
+from .projectiles import PlayerBullet, RailgunBullet
 
 
 class Player(pygame.sprite.Sprite):
@@ -96,8 +103,56 @@ class Player(pygame.sprite.Sprite):
         self.base_fire_rate = PLAYER_FIRE_RATE
         self.reflex_timer = 0.0       # temporary fire rate buff
 
+        # Railgun power-up buff
+        self.railgun_timer = 0.0      # seconds of railgun mode remaining
+
+        # Combo visual tier (0=normal, 1=x5, 2=x10) — set by game.py
+        self.combo_tier = 0
+
         # Shooting state flag (cleared when focus is lost)
         self.is_shooting = False
+
+        # ── Ultimate: Neon Pulse ──
+        self.ult_charge = 0.0            # accumulated charge (0 .. ULT_COOLDOWN)
+        self.ult_ready = False           # True when fully charged
+        self.ult_active_timer = 0.0      # brief visual window after activation
+        self.ult_upgrades = {'sniper': False, 'slime': False, 'tank': False}
+        # Boss artifacts collected (keys: 'sniper', 'slime', 'tank')
+        self.boss_artifacts = {'sniper': False, 'slime': False, 'tank': False}
+        # Signal for game.py to process the pulse this frame
+        self.ult_fired_this_frame = False
+
+    def gain_ult_charge(self, amount=None):
+        """Add charge toward the ultimate. Called on enemy kills."""
+        if amount is None:
+            amount = ULT_CHARGE_PER_KILL
+        self.ult_charge = min(ULT_COOLDOWN, self.ult_charge + amount)
+        if self.ult_charge >= ULT_COOLDOWN:
+            self.ult_ready = True
+
+    def try_activate_ultimate(self):
+        """Attempt to fire the Neon Pulse. Returns True if activated."""
+        if not self.ult_ready:
+            return False
+        self.ult_ready = False
+        self.ult_charge = 0.0
+        self.ult_active_timer = 0.5  # brief flash window
+        self.ult_fired_this_frame = True
+
+        # Tank augment: grant invincibility
+        if self.ult_upgrades['tank']:
+            self.invincible_timer = max(self.invincible_timer, ULT_TANK_INVINCIBILITY)
+
+        # Visual: emit the radial blast particles
+        augmented = any(self.ult_upgrades.values())
+        self.particles.emit_neon_pulse(
+            self.pos_x, self.pos_y, ULT_PULSE_RADIUS, augmented=augmented)
+        return True
+
+    @property
+    def ult_charge_ratio(self):
+        """0.0 to 1.0 charge progress."""
+        return min(1.0, self.ult_charge / ULT_COOLDOWN)
 
     def take_damage(self, amount):
         if self.invincible_timer > 0 or self.is_dashing:
@@ -175,6 +230,8 @@ class Player(pygame.sprite.Sprite):
             self.double_damage_timer = DOUBLE_DAMAGE_DURATION
         elif powerup_type == "speed_boost":
             self.speed_boost_timer = SPEED_BOOST_DURATION
+        elif powerup_type == "railgun":
+            self.railgun_timer = RAILGUN_DURATION
 
     def update(self, dt, mouse_screen_pos, camera):
         self.fire_timer = max(0, self.fire_timer - dt)
@@ -185,7 +242,10 @@ class Player(pygame.sprite.Sprite):
         self.double_damage_timer = max(0, self.double_damage_timer - dt)
         self.speed_boost_timer = max(0, self.speed_boost_timer - dt)
         self.reflex_timer = max(0, self.reflex_timer - dt)
+        self.railgun_timer = max(0, self.railgun_timer - dt)
         self.dash_ended_this_frame = False
+        self.ult_fired_this_frame = False
+        self.ult_active_timer = max(0, self.ult_active_timer - dt)
 
         keys = pygame.key.get_pressed()
 
@@ -307,28 +367,56 @@ class Player(pygame.sprite.Sprite):
             if self.double_damage_timer > 0:
                 dmg *= 2
 
+            # --- Determine bullet angles ---
             if count == 1:
                 angles = [self.aim_angle]
             else:
-                # 360-degree circular spray: evenly distribute bullets
-                angles = [
-                    self.aim_angle + (2 * math.pi / count) * i
-                    for i in range(count)
-                ]
+                # Forward-facing cone: center shot always fires,
+                # extra bullets spread symmetrically in the cone.
+                cone = SHOTGUN_CONE_ANGLE
+                angles = [self.aim_angle]          # center barrel always fires
+                n_extra = count - 1
+                max_levels = (n_extra + 1) // 2    # unique spread distances
+                for lvl in range(1, max_levels + 1):
+                    spread = cone * lvl / max_levels
+                    angles.append(self.aim_angle + spread)
+                    if len(angles) < count:
+                        angles.append(self.aim_angle - spread)
 
-            bullet_color = NEON_YELLOW if self.double_damage_timer > 0 else NEON_CYAN
-            for angle in angles:
-                bx = self.pos_x + math.cos(angle) * gun_dist
-                by = self.pos_y + math.sin(angle) * gun_dist
-                bullet = PlayerBullet(bx, by, angle,
-                                      self.bullet_speed, dmg,
-                                      color=bullet_color,
-                                      size=self.bullet_size)
-                bullet_group.add(bullet)
-                self.particles.emit(bx, by, bullet_color, count=3,
-                                    speed_range=(50, 150), lifetime_range=(0.1, 0.2),
-                                    size_range=(2, 4),
-                                    angle_range=(angle - 0.3, angle + 0.3))
+            # --- Choose bullet type ---
+            use_railgun = self.railgun_timer > 0
+
+            if use_railgun:
+                bullet_color = NEON_BLUE
+                rail_dmg = dmg * RAILGUN_DAMAGE_MULT
+                for angle in angles:
+                    bx = self.pos_x + math.cos(angle) * gun_dist
+                    by = self.pos_y + math.sin(angle) * gun_dist
+                    bullet = RailgunBullet(
+                        bx, by, angle,
+                        RAILGUN_BULLET_SPEED, rail_dmg,
+                        color=bullet_color,
+                        size=RAILGUN_SIZE,
+                    )
+                    bullet_group.add(bullet)
+                    self.particles.emit(bx, by, bullet_color, count=4,
+                                        speed_range=(80, 200), lifetime_range=(0.1, 0.25),
+                                        size_range=(2, 5),
+                                        angle_range=(angle - 0.3, angle + 0.3))
+            else:
+                bullet_color = NEON_YELLOW if self.double_damage_timer > 0 else NEON_CYAN
+                for angle in angles:
+                    bx = self.pos_x + math.cos(angle) * gun_dist
+                    by = self.pos_y + math.sin(angle) * gun_dist
+                    bullet = PlayerBullet(bx, by, angle,
+                                          self.bullet_speed, dmg,
+                                          color=bullet_color,
+                                          size=self.bullet_size)
+                    bullet_group.add(bullet)
+                    self.particles.emit(bx, by, bullet_color, count=3,
+                                        speed_range=(50, 150), lifetime_range=(0.1, 0.2),
+                                        size_range=(2, 4),
+                                        angle_range=(angle - 0.3, angle + 0.3))
             return True
         return False
 
@@ -338,14 +426,26 @@ class Player(pygame.sprite.Sprite):
         sc = camera.s  # shorthand for scaling
 
         # ── Glow ──
+        # Combo-tier glow color override
+        if self.combo_tier >= 2:
+            glow_base_color = NEON_MAGENTA
+        elif self.combo_tier >= 1:
+            glow_base_color = NEON_ORANGE
+        else:
+            glow_base_color = NEON_CYAN
+
         glow_r = sc(self.radius + 12)
         glow_surf = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
         glow_alpha = 30
+        if self.combo_tier >= 2:
+            glow_alpha = 55 + int(20 * abs(math.sin(pygame.time.get_ticks() * 0.008)))
+        elif self.combo_tier >= 1:
+            glow_alpha = 45
         if self.is_dashing:
             glow_alpha = 60
         if self.invincible_timer > 0:
             glow_alpha = 15 + int(45 * abs(math.sin(self.invincible_timer * 15)))
-        pygame.draw.circle(glow_surf, (*NEON_CYAN, glow_alpha),
+        pygame.draw.circle(glow_surf, (*glow_base_color, glow_alpha),
                            (glow_r, glow_r), glow_r)
         surface.blit(glow_surf, (sx - glow_r, sy - glow_r))
 
@@ -444,6 +544,28 @@ class Player(pygame.sprite.Sprite):
                 pygame.draw.circle(ref_surf, (220, 230, 255, ref_alpha),
                                    (ref_r, ref_r), ref_r, max(1, sc(1)))
                 surface.blit(ref_surf, (sx - ref_r, sy - ref_r))
+
+        # ── Neon Pulse active flash ──
+        if self.ult_active_timer > 0:
+            pulse_progress = self.ult_active_timer / 0.5
+            ult_r = r + sc(int(30 * (1.0 - pulse_progress)))
+            ult_alpha = int(120 * pulse_progress)
+            if ult_r > 0 and ult_alpha > 0:
+                ult_surf = pygame.Surface((ult_r * 2, ult_r * 2), pygame.SRCALPHA)
+                pygame.draw.circle(ult_surf, (*NEON_PURPLE, ult_alpha),
+                                   (ult_r, ult_r), ult_r)
+                surface.blit(ult_surf, (sx - ult_r, sy - ult_r))
+
+        # ── Ultimate ready indicator (pulsing ring) ──
+        if self.ult_ready:
+            ult_pulse = 0.6 + 0.4 * math.sin(pygame.time.get_ticks() * 0.01)
+            ready_r = r + sc(16)
+            ready_alpha = int(80 * ult_pulse)
+            if ready_r > 0:
+                ready_surf = pygame.Surface((ready_r * 2, ready_r * 2), pygame.SRCALPHA)
+                pygame.draw.circle(ready_surf, (*NEON_PURPLE, ready_alpha),
+                                   (ready_r, ready_r), ready_r, max(1, sc(2)))
+                surface.blit(ready_surf, (sx - ready_r, sy - ready_r))
 
     @property
     def alive(self):

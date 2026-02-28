@@ -4,7 +4,7 @@ enemy_manager.py - Wave spawning and difficulty scaling
 
 import random
 import math
-from .enemies import Chaser, Shooter, Tank, Boss, SniperBoss, SlimeBoss
+from .enemies import Chaser, Shooter, Tank, Boss, SniperBoss, SlimeBoss, SuicideBomber, ShieldGuard
 from .settings import (
     ARENA_WIDTH, ARENA_HEIGHT, SPAWN_MARGIN, SPAWN_MIN_DIST,
     WAVE_BREAK_TIME, SCREEN_WIDTH, SCREEN_HEIGHT,
@@ -12,24 +12,27 @@ from .settings import (
     DIFFICULTY_DAMAGE_PER_LEVEL,
     BOSS_WAVE_INTERVAL, BOSS_SLAM_DAMAGE, BOSS_DIFFICULTY_BOOST,
     SLIME_BOSS_SHOCKWAVE_DAMAGE,
+    BOMBER_SPAWN_WAVE, SHIELD_GUARD_SPAWN_WAVE,
 )
 
 
 class WaveDefinition:
     """Defines a single wave's enemy composition."""
 
-    def __init__(self, chasers=0, shooters=0, tanks=0,
+    def __init__(self, chasers=0, shooters=0, tanks=0, bombers=0, guards=0,
                  hp_mult=1.0, speed_mult=1.0, damage_mult=1.0):
         self.chasers = chasers
         self.shooters = shooters
         self.tanks = tanks
+        self.bombers = bombers
+        self.guards = guards
         self.hp_mult = hp_mult
         self.speed_mult = speed_mult
         self.damage_mult = damage_mult
 
     @property
     def total(self):
-        return self.chasers + self.shooters + self.tanks
+        return self.chasers + self.shooters + self.tanks + self.bombers + self.guards
 
 
 class EnemyManager:
@@ -70,6 +73,14 @@ class EnemyManager:
         shooters = min(shooters, 10)
         tanks = min(tanks, 5)
 
+        # SuicideBombers from wave 5
+        bombers = max(0, (wave_num - BOMBER_SPAWN_WAVE + 1)) if wave_num >= BOMBER_SPAWN_WAVE else 0
+        bombers = min(bombers, 6)
+
+        # ShieldGuards from wave 8
+        guards = max(0, (wave_num - SHIELD_GUARD_SPAWN_WAVE + 2) // 2) if wave_num >= SHIELD_GUARD_SPAWN_WAVE else 0
+        guards = min(guards, 4)
+
         wave_hp = 1.0 + (wave_num - 1) * 0.1
         wave_speed = 1.0 + (wave_num - 1) * 0.03
         wave_damage = 1.0 + (wave_num - 1) * 0.05
@@ -79,7 +90,7 @@ class EnemyManager:
         speed_mult = wave_speed * (1.0 + (df - 1.0) * DIFFICULTY_SPEED_PER_LEVEL / 0.05)
         damage_mult = wave_damage * (1.0 + (df - 1.0) * DIFFICULTY_DAMAGE_PER_LEVEL / 0.05)
 
-        return WaveDefinition(chasers, shooters, tanks,
+        return WaveDefinition(chasers, shooters, tanks, bombers, guards,
                               hp_mult, speed_mult, damage_mult)
 
     def _get_spawn_pos(self, player_x, player_y, camera_rect):
@@ -207,6 +218,18 @@ class EnemyManager:
             x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
             enemy = Tank(x, y, wave_def.hp_mult, wave_def.speed_mult,
                          wave_def.damage_mult)
+            enemy_group.add(enemy)
+
+        for _ in range(wave_def.bombers):
+            x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
+            enemy = SuicideBomber(x, y, wave_def.hp_mult, wave_def.speed_mult,
+                                  wave_def.damage_mult)
+            enemy_group.add(enemy)
+
+        for _ in range(wave_def.guards):
+            x, y = self._get_spawn_pos(player_x, player_y, camera_rect)
+            enemy = ShieldGuard(x, y, wave_def.hp_mult, wave_def.speed_mult,
+                                wave_def.damage_mult)
             enemy_group.add(enemy)
 
     def on_enemy_killed(self):

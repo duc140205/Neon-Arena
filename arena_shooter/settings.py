@@ -99,6 +99,24 @@ SHOCKWAVE_PUSHBACK = 400          # push speed on enemies
 REFLEX_FIRE_RATE_MULT = 0.5       # 50% faster fire rate
 REFLEX_DURATION = 3.0             # seconds of boosted fire rate
 
+# Shotgun (multi_barrel cone spread)
+SHOTGUN_CONE_ANGLE = 0.6          # total cone half-angle in radians (~35°)
+
+# Knockback (applied to enemies hit by PlayerBullet)
+BULLET_KNOCKBACK_FACTOR = 0.35    # fraction of bullet speed applied as pushback
+
+# Railgun power-up
+RAILGUN_DURATION = 6.0            # seconds the railgun buff lasts
+RAILGUN_BULLET_SPEED = 1200       # faster than normal bullets
+RAILGUN_DAMAGE_MULT = 1.5         # damage multiplier over current bullet_damage
+RAILGUN_SIZE = 8                  # slightly larger bullet
+
+# Score & Combo system
+COMBO_WINDOW = 2.0                # seconds before combo resets to 0
+SCORE_MULTIPLIER = 1.0            # global score scaling factor
+COMBO_TIER1_THRESHOLD = 5         # x5 combo milestone
+COMBO_TIER2_THRESHOLD = 10        # x10 combo milestone
+
 # ── Enemy Settings ───────────────────────────────────────
 # Chaser
 CHASER_SPEED = 150
@@ -207,6 +225,30 @@ TANK_SHIELD_COOLDOWN = 8.0         # seconds between shields
 TANK_SHIELD_DURATION = 3.0         # seconds shield lasts
 TANK_SHIELD_REDUCTION = 0.7        # damage reduced (70% reduction)
 
+# SuicideBomber
+BOMBER_SPEED = 220                 # fast approach
+BOMBER_HP = 30                     # fragile
+BOMBER_SIZE = 14                   # small
+BOMBER_DAMAGE = 60                 # explosion damage to player
+BOMBER_XP = 35
+BOMBER_COLOR = NEON_YELLOW
+BOMBER_PRIME_RANGE = 60            # distance to start priming
+BOMBER_PRIME_DURATION = 1.0        # seconds of flashing before boom
+BOMBER_EXPLOSION_RADIUS = 120      # AOE radius of the detonation
+BOMBER_SPAWN_WAVE = 5              # first wave they can appear
+BOMBER_TURN_RATE = 4.0             # radians per second turning speed
+
+# ShieldGuard
+SHIELD_GUARD_SPEED = 45            # very slow
+SHIELD_GUARD_HP = 250              # tanky
+SHIELD_GUARD_SIZE = 26             # large
+SHIELD_GUARD_DAMAGE = 15           # melee contact damage
+SHIELD_GUARD_XP = 55
+SHIELD_GUARD_COLOR = NEON_CYAN
+SHIELD_GUARD_ARC = math.radians(120)  # front shield arc (120 degrees)
+SHIELD_GUARD_SPAWN_WAVE = 8       # first wave they can appear
+SHIELD_GUARD_TURN_RATE = 2.5      # radians per second turning speed
+
 # ── Upgrades ─────────────────────────────────────────────
 UPGRADES = {
     "fire_rate": {
@@ -287,6 +329,27 @@ UPGRADES = {
         "max_level": 3,
     },
 }
+
+# ── Ultimate Skill: Neon Pulse ───────────────────────────
+ULT_COOLDOWN = 45.0               # seconds between ultimate uses
+ULT_CHARGE_PER_KILL = 5.0         # charge gained per enemy kill (out of ULT_COOLDOWN)
+ULT_PULSE_RADIUS = 350            # base radius of the radial blast
+ULT_PULSE_DAMAGE = 60             # base damage to enemies in radius
+ULT_PUSHBACK_FORCE = 600          # pushback speed applied to enemies
+ULT_SLOW_DURATION = 3.0           # seconds enemies are slowed
+ULT_SLOW_FACTOR = 0.4             # enemy speed multiplied by this while slowed
+ULT_LASER_COUNT = 6               # auto-aiming lasers (sniper augment)
+ULT_LASER_DAMAGE = 40             # damage per laser
+ULT_LASER_SPEED = 1400            # laser projectile speed
+ULT_TOXIC_POOL_COUNT = 8          # toxic pools left (slime augment)
+ULT_TOXIC_POOL_DAMAGE = 8         # damage per tick from toxic pool
+ULT_TOXIC_POOL_LIFETIME = 4.0     # seconds toxic pool lasts
+ULT_TOXIC_POOL_RADIUS = 30        # radius of each toxic pool
+ULT_TANK_INVINCIBILITY = 4.0      # seconds of invincibility (tank augment)
+ULT_TANK_PUSHBACK_MULT = 2.5      # knockback multiplier (tank augment)
+
+# Trial challenge requirements
+TRIAL_KILL_TARGET = 10            # kills without taking damage
 
 # ── Particles ────────────────────────────────────────────
 PARTICLE_GRAVITY = 0
