@@ -91,6 +91,9 @@ class Player(pygame.sprite.Sprite):
         self.base_fire_rate = PLAYER_FIRE_RATE
         self.reflex_timer = 0.0       # temporary fire rate buff
 
+        # Shooting state flag (cleared when focus is lost)
+        self.is_shooting = False
+
     def take_damage(self, amount):
         if self.invincible_timer > 0 or self.is_dashing:
             return False
@@ -179,21 +182,7 @@ class Player(pygame.sprite.Sprite):
         self.reflex_timer = max(0, self.reflex_timer - dt)
         self.dash_ended_this_frame = False
 
-        # When the window is not focused (e.g. screenshot overlay is open),
-        # treat every key as released so the player doesn't drift forever.
-        # Timers, dash physics, particles, and enemy AI still update normally.
-        if pygame.key.get_focused():
-            keys = pygame.key.get_pressed()
-        else:
-            # Window lost focus (e.g. Win+Shift+S screenshot overlay).
-            # Return False for every key so the player stops moving, but
-            # all physics / timers / AI continue running in the background.
-            # A plain list won't work because SDL2 key constants (K_UP etc.)
-            # are very large integers; use a proxy that accepts any index.
-            class _NoKeys:
-                def __getitem__(self, _):
-                    return False
-            keys = _NoKeys()
+        keys = pygame.key.get_pressed()
 
         if self.is_dashing:
             self.dash_timer -= dt
@@ -262,7 +251,16 @@ class Player(pygame.sprite.Sprite):
         self.aim_angle = math.atan2(mouse_world_y - self.pos_y, mouse_world_x - self.pos_x)
 
     def try_shoot(self, bullet_group):
+        # Only read mouse buttons when the OS cursor is inside our window.
+        # pygame.mouse.get_focused() returns False the instant an overlay
+        # (e.g. Win+Shift+S snipping tool) steals focus, so this is the last
+        # line of defence against stale button states causing a crash.
+        if not pygame.mouse.get_focused():
+            self.is_shooting = False
+            return False
+
         mouse_buttons = pygame.mouse.get_pressed()
+        self.is_shooting = bool(mouse_buttons[0])
         # Effective fire rate (with reflex buff)
         effective_fire_rate = self.fire_rate
         if self.reflex_timer > 0:

@@ -47,6 +47,9 @@ class Game:
         # Must be set before pygame.init() to cover the initial window.
         os.environ['SDL_VIDEO_CENTERED'] = '1'
         os.environ.pop('SDL_VIDEO_WINDOW_POS', None)
+        # Prevent SDL from minimising (and potentially crashing) the window
+        # when it loses focus — critical for Win+Shift+S screenshot overlay.
+        os.environ['SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS'] = '0'
 
         pygame.init()
         pygame.mixer.init()
@@ -356,11 +359,9 @@ class Game:
 
     def run(self):
         while self.running:
-            # Clamp dt to 33 ms max so a long screenshot pause never causes
-            # a physics "jump" when focus returns to the window.
+            # Always tick the clock and pump events, even when unfocused, so
+            # the OS window message loop stays alive (avoids "not responding").
             dt = min(self.clock.tick(self.config.fps) / 1000.0, 0.033)
-            self.time += dt
-            self.fps = self.clock.get_fps()
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -368,28 +369,49 @@ class Game:
                     return
                 self._handle_event(event)
 
-            self._update(dt)
-
-            # ── Draw directly to screen (NATIVE resolution) ──
-            self._draw(self.screen)
-
-            pygame.display.flip()
+            if pygame.display.get_active():
+                # ── Normal active frame ──────────────────────────────────────
+                self.time += dt
+                self.fps = self.clock.get_fps()
+                self._update(dt)
+                self._draw(self.screen)
+                pygame.display.flip()
+            else:
+                # ── Safe-sleep: window obscured / focus stolen ───────────────
+                # Drop to ~10 FPS, keep pumping so the window stays responsive,
+                # and skip all logic + drawing to prevent a crash while the
+                # Win+Shift+S screenshot overlay (or any other overlay) is open.
+                if self.player is not None:
+                    self.player.is_shooting = False
+                pygame.time.delay(100)   # ~10 FPS
+                pygame.event.pump()      # keep OS message loop alive
+                continue
 
         pygame.quit()
 
     # ── Event Handling ───────────────────────────────────
 
     def _handle_event(self, event):
-        # ── Focus / visibility events – never pause the game ──────────────────
-        # pygame.ACTIVEEVENT fires when the window gains or loses focus.
-        #   event.gain == 0  → window lost focus (e.g. screenshot tool opened)
-        #   event.state == 6 → window minimised / hidden
-        # We intentionally ignore these so the game keeps running while the
-        # user is capturing a screenshot with Ctrl+Shift+S.
-        if event.type == pygame.ACTIVEEVENT:
-            return
-        # SDL2 sends WINDOWFOCUSLOST instead of ACTIVEEVENT; also ignore it.
-        if event.type == pygame.WINDOWFOCUSLOST:
+        # ── Focus / visibility events ───────────────────────────────────────
+        # Covers pygame 1.x ACTIVEEVENT, SDL2 WINDOWFOCUSLOST, and the newer
+        # WINDOWLOSTFOCUS constant — whichever the installed SDL version fires.
+        if event.type in (pygame.ACTIVEEVENT,
+                          pygame.WINDOWFOCUSLOST,
+                          getattr(pygame, 'WINDOWLOSTFOCUS', -1)):
+            focus_lost = (
+                (event.type == pygame.ACTIVEEVENT and getattr(event, 'gain', 1) == 0)
+                or event.type != pygame.ACTIVEEVENT
+            )
+            if focus_lost:
+                # Stop shooting immediately — the safe-sleep branch in run()
+                # will also enforce this every frame while unfocused.
+                if self.player is not None:
+                    self.player.is_shooting = False
+                # Flush stuck mouse-button signals from the event queue.
+                pygame.event.clear(pygame.MOUSEBUTTONDOWN)
+                pygame.event.clear(pygame.MOUSEBUTTONUP)
+                # Give the OS snipping tool a clean, visible cursor.
+                pygame.mouse.set_visible(True)
             return
 
         # Handle window resize
