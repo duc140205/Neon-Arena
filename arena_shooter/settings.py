@@ -67,6 +67,7 @@ POWERUP_TYPES = {
     "shield": {"name": "SHIELD", "color": NEON_CYAN, "icon": "O", "weight": 30},
     "double_damage": {"name": "2x DMG", "color": NEON_YELLOW, "icon": "!", "weight": 20},
     "speed_boost": {"name": "SPEED", "color": NEON_MAGENTA, "icon": ">", "weight": 10},
+    "railgun": {"name": "RAILGUN", "color": NEON_BLUE, "icon": "⚡", "weight": 15},
 }
 SHIELD_DURATION = 5.0             # seconds
 DOUBLE_DAMAGE_DURATION = 6.0      # seconds
