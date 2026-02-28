@@ -23,6 +23,7 @@ from .settings import (
 from .obstacles import generate_obstacles, PowerUpManager
 from .config import Config, resource_path, assets
 from .player import Player
+from .projectiles import RailgunBullet
 from .particles import ParticleSystem
 from .camera import Camera
 from .enemy_manager import EnemyManager
@@ -807,13 +808,29 @@ class Game:
 
     def _check_collisions(self):
         for bullet in list(self.player_bullets):
+            is_railgun = isinstance(bullet, RailgunBullet)
             for enemy in list(self.enemies):
                 dx = bullet.pos_x - enemy.pos_x
                 dy = bullet.pos_y - enemy.pos_y
                 dist = math.sqrt(dx * dx + dy * dy)
                 if dist < bullet.radius + enemy.radius:
+                    # Railgun: skip enemies already pierced
+                    if is_railgun and bullet.has_hit(id(enemy)):
+                        continue
+
                     killed = enemy.take_damage(bullet.damage, self.particles)
-                    bullet.kill()
+
+                    # Apply knockback if the bullet carries it
+                    if hasattr(bullet, 'knockback_vx') and not killed:
+                        enemy.pos_x += bullet.knockback_vx * 0.1
+                        enemy.pos_y += bullet.knockback_vy * 0.1
+
+                    if is_railgun:
+                        # Railgun penetrates — record hit but do NOT kill bullet
+                        bullet.register_hit(id(enemy))
+                    else:
+                        bullet.kill()
+
                     if killed:
                         self._play_sound("explode")
                         self.enemy_manager.on_enemy_killed()
@@ -824,7 +841,9 @@ class Game:
                             self.state = GameState.UPGRADE
                             # Scale difficulty with player level
                             self.enemy_manager.set_difficulty(self.player.level)
-                    break
+
+                    if not is_railgun:
+                        break
 
         if not self.player.is_dashing:
             for bullet in list(self.enemy_bullets):

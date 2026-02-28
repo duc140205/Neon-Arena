@@ -9,7 +9,7 @@ from .settings import (
     PLAYER_SPEED, PLAYER_SIZE, PLAYER_MAX_HP, PLAYER_FIRE_RATE,
     PLAYER_BULLET_SPEED, PLAYER_BULLET_DAMAGE, PLAYER_BULLET_SIZE,
     DASH_SPEED, DASH_DURATION, DASH_COOLDOWN, DASH_PARTICLES, DASH_DECAY_DURATION,
-    NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_ORANGE, NEON_YELLOW, WHITE,
+    NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_ORANGE, NEON_YELLOW, NEON_BLUE, WHITE,
     ARENA_WIDTH, ARENA_HEIGHT,
     BASE_XP_REQUIRED, XP_SCALE_FACTOR,
     GHOST_TRAIL_INTERVAL, GHOST_TRAIL_LIFETIME, GHOST_TRAIL_RADIUS,
@@ -17,8 +17,10 @@ from .settings import (
     SHIELD_DURATION, DOUBLE_DAMAGE_DURATION,
     SPEED_BOOST_DURATION, SPEED_BOOST_MULT,
     REFLEX_FIRE_RATE_MULT, REFLEX_DURATION,
+    SHOTGUN_CONE_ANGLE,
+    RAILGUN_DURATION, RAILGUN_BULLET_SPEED, RAILGUN_DAMAGE_MULT, RAILGUN_SIZE,
 )
-from .projectiles import PlayerBullet
+from .projectiles import PlayerBullet, RailgunBullet
 
 
 class Player(pygame.sprite.Sprite):
@@ -95,6 +97,9 @@ class Player(pygame.sprite.Sprite):
         self.speed_boost_timer = 0.0
         self.base_fire_rate = PLAYER_FIRE_RATE
         self.reflex_timer = 0.0       # temporary fire rate buff
+
+        # Railgun power-up buff
+        self.railgun_timer = 0.0      # seconds of railgun mode remaining
 
         # Shooting state flag (cleared when focus is lost)
         self.is_shooting = False
@@ -175,6 +180,8 @@ class Player(pygame.sprite.Sprite):
             self.double_damage_timer = DOUBLE_DAMAGE_DURATION
         elif powerup_type == "speed_boost":
             self.speed_boost_timer = SPEED_BOOST_DURATION
+        elif powerup_type == "railgun":
+            self.railgun_timer = RAILGUN_DURATION
 
     def update(self, dt, mouse_screen_pos, camera):
         self.fire_timer = max(0, self.fire_timer - dt)
@@ -185,6 +192,7 @@ class Player(pygame.sprite.Sprite):
         self.double_damage_timer = max(0, self.double_damage_timer - dt)
         self.speed_boost_timer = max(0, self.speed_boost_timer - dt)
         self.reflex_timer = max(0, self.reflex_timer - dt)
+        self.railgun_timer = max(0, self.railgun_timer - dt)
         self.dash_ended_this_frame = False
 
         keys = pygame.key.get_pressed()
@@ -307,28 +315,56 @@ class Player(pygame.sprite.Sprite):
             if self.double_damage_timer > 0:
                 dmg *= 2
 
+            # --- Determine bullet angles ---
             if count == 1:
                 angles = [self.aim_angle]
             else:
-                # 360-degree circular spray: evenly distribute bullets
-                angles = [
-                    self.aim_angle + (2 * math.pi / count) * i
-                    for i in range(count)
-                ]
+                # Forward-facing cone: center shot always fires,
+                # extra bullets spread symmetrically in the cone.
+                cone = SHOTGUN_CONE_ANGLE
+                angles = [self.aim_angle]          # center barrel always fires
+                n_extra = count - 1
+                max_levels = (n_extra + 1) // 2    # unique spread distances
+                for lvl in range(1, max_levels + 1):
+                    spread = cone * lvl / max_levels
+                    angles.append(self.aim_angle + spread)
+                    if len(angles) < count:
+                        angles.append(self.aim_angle - spread)
 
-            bullet_color = NEON_YELLOW if self.double_damage_timer > 0 else NEON_CYAN
-            for angle in angles:
-                bx = self.pos_x + math.cos(angle) * gun_dist
-                by = self.pos_y + math.sin(angle) * gun_dist
-                bullet = PlayerBullet(bx, by, angle,
-                                      self.bullet_speed, dmg,
-                                      color=bullet_color,
-                                      size=self.bullet_size)
-                bullet_group.add(bullet)
-                self.particles.emit(bx, by, bullet_color, count=3,
-                                    speed_range=(50, 150), lifetime_range=(0.1, 0.2),
-                                    size_range=(2, 4),
-                                    angle_range=(angle - 0.3, angle + 0.3))
+            # --- Choose bullet type ---
+            use_railgun = self.railgun_timer > 0
+
+            if use_railgun:
+                bullet_color = NEON_BLUE
+                rail_dmg = dmg * RAILGUN_DAMAGE_MULT
+                for angle in angles:
+                    bx = self.pos_x + math.cos(angle) * gun_dist
+                    by = self.pos_y + math.sin(angle) * gun_dist
+                    bullet = RailgunBullet(
+                        bx, by, angle,
+                        RAILGUN_BULLET_SPEED, rail_dmg,
+                        color=bullet_color,
+                        size=RAILGUN_SIZE,
+                    )
+                    bullet_group.add(bullet)
+                    self.particles.emit(bx, by, bullet_color, count=4,
+                                        speed_range=(80, 200), lifetime_range=(0.1, 0.25),
+                                        size_range=(2, 5),
+                                        angle_range=(angle - 0.3, angle + 0.3))
+            else:
+                bullet_color = NEON_YELLOW if self.double_damage_timer > 0 else NEON_CYAN
+                for angle in angles:
+                    bx = self.pos_x + math.cos(angle) * gun_dist
+                    by = self.pos_y + math.sin(angle) * gun_dist
+                    bullet = PlayerBullet(bx, by, angle,
+                                          self.bullet_speed, dmg,
+                                          color=bullet_color,
+                                          size=self.bullet_size)
+                    bullet_group.add(bullet)
+                    self.particles.emit(bx, by, bullet_color, count=3,
+                                        speed_range=(50, 150), lifetime_range=(0.1, 0.2),
+                                        size_range=(2, 4),
+                                        angle_range=(angle - 0.3, angle + 0.3))
             return True
         return False
 

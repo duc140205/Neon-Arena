@@ -99,6 +99,18 @@ SHOCKWAVE_PUSHBACK = 400          # push speed on enemies
 REFLEX_FIRE_RATE_MULT = 0.5       # 50% faster fire rate
 REFLEX_DURATION = 3.0             # seconds of boosted fire rate
 
+# Shotgun (multi_barrel cone spread)
+SHOTGUN_CONE_ANGLE = 0.6          # total cone half-angle in radians (~35°)
+
+# Knockback (applied to enemies hit by PlayerBullet)
+BULLET_KNOCKBACK_FACTOR = 0.35    # fraction of bullet speed applied as pushback
+
+# Railgun power-up
+RAILGUN_DURATION = 6.0            # seconds the railgun buff lasts
+RAILGUN_BULLET_SPEED = 1200       # faster than normal bullets
+RAILGUN_DAMAGE_MULT = 1.5         # damage multiplier over current bullet_damage
+RAILGUN_SIZE = 8                  # slightly larger bullet
+
 # ── Enemy Settings ───────────────────────────────────────
 # Chaser
 CHASER_SPEED = 150
