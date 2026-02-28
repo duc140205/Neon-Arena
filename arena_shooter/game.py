@@ -19,11 +19,15 @@ from .settings import (
     SPEED_BOOST_MULT,
     BOSS_SLAM_DAMAGE,
     SLIME_BOSS_SHOCKWAVE_DAMAGE,
+    COMBO_WINDOW, SCORE_MULTIPLIER,
+    COMBO_TIER1_THRESHOLD, COMBO_TIER2_THRESHOLD,
+    BOMBER_EXPLOSION_RADIUS, BOMBER_DAMAGE,
 )
 from .obstacles import generate_obstacles, PowerUpManager
 from .config import Config, resource_path, assets
 from .player import Player
 from .projectiles import RailgunBullet
+from .enemies import ShieldGuard, SuicideBomber
 from .particles import ParticleSystem
 from .camera import Camera
 from .enemy_manager import EnemyManager
@@ -415,6 +419,13 @@ class Game:
         self.toxic_pools = []
         self.upgrade_options = []
         self.pending_levelups = 0
+
+        # Score / Combo
+        self.score = 0
+        self.combo_counter = 0
+        self.combo_timer = 0.0
+        self.combo_display_timer = 0.0   # cosmetic pulse timer
+
         self.state = GameState.PLAYING
 
     def _open_settings(self):
@@ -635,6 +646,34 @@ class Game:
         for enemy in self.enemies:
             enemy.update(dt, self.player.pos_x, self.player.pos_y, self.enemy_bullets)
 
+        # ── SuicideBomber explosion check ──
+        for enemy in list(self.enemies):
+            if isinstance(enemy, SuicideBomber) and enemy.exploded:
+                ex, ey = enemy.pos_x, enemy.pos_y
+                # Massive particle explosion
+                self.particles.emit_explosion(ex, ey, color=NEON_YELLOW, count=35)
+                self.particles.emit_explosion(ex, ey, color=NEON_ORANGE, count=20)
+                self._play_sound("explode")
+                # AOE damage to player
+                pdx = self.player.pos_x - ex
+                pdy = self.player.pos_y - ey
+                pdist = math.sqrt(pdx * pdx + pdy * pdy)
+                if pdist < BOMBER_EXPLOSION_RADIUS + self.player.radius:
+                    self.player.take_damage(enemy.damage)
+                # AOE damage to other enemies caught in the blast
+                for other in list(self.enemies):
+                    if other is enemy:
+                        continue
+                    odx = other.pos_x - ex
+                    ody = other.pos_y - ey
+                    odist = math.sqrt(odx * odx + ody * ody)
+                    if odist < BOMBER_EXPLOSION_RADIUS + other.radius:
+                        other.take_damage(enemy.damage // 2, self.particles)
+                # Remove the bomber and credit the kill
+                enemy.hp = 0
+                enemy.kill()
+                self.enemy_manager.on_enemy_killed()
+
         for bullet in self.player_bullets:
             bullet.update(dt)
         for bullet in self.enemy_bullets:
@@ -799,6 +838,16 @@ class Game:
         self.particles.update(dt)
         self._check_collisions()
 
+        # ── Combo timer decay ──
+        if self.combo_timer > 0:
+            self.combo_timer -= dt
+            if self.combo_timer <= 0:
+                self.combo_counter = 0
+                self.combo_timer = 0.0
+                self.player.combo_tier = 0
+        if self.combo_display_timer > 0:
+            self.combo_display_timer -= dt
+
         if not self.player.alive:
             self.state = GameState.GAME_OVER
             self.particles.emit_explosion(self.player.pos_x, self.player.pos_y, count=30)
@@ -818,7 +867,26 @@ class Game:
                     if is_railgun and bullet.has_hit(id(enemy)):
                         continue
 
-                    killed = enemy.take_damage(bullet.damage, self.particles)
+                    # ShieldGuard: directional front-shield immunity
+                    if isinstance(enemy, ShieldGuard):
+                        hit_angle = math.atan2(
+                            bullet.pos_y - enemy.pos_y,
+                            bullet.pos_x - enemy.pos_x)
+                        killed = enemy.take_damage(
+                            bullet.damage, self.particles, from_angle=hit_angle)
+                        # If shielded, take_damage returns False and bullet just bounces
+                        if not killed and enemy.hp > 0:
+                            # Bullet was blocked — consume it (unless railgun)
+                            if enemy.is_bullet_shielded(hit_angle):
+                                if not is_railgun:
+                                    bullet.kill()
+                                else:
+                                    bullet.register_hit(id(enemy))
+                                if not is_railgun:
+                                    break
+                                continue
+                    else:
+                        killed = enemy.take_damage(bullet.damage, self.particles)
 
                     # Apply knockback if the bullet carries it
                     if hasattr(bullet, 'knockback_vx') and not killed:
@@ -832,6 +900,26 @@ class Game:
                         bullet.kill()
 
                     if killed:
+                        # ── Combo & Score ──
+                        self.combo_counter += 1
+                        self.combo_timer = COMBO_WINDOW
+                        combo_mult = 1 + (self.combo_counter - 1) * 0.25
+                        points = int(enemy.xp_value * combo_mult * SCORE_MULTIPLIER)
+                        self.score += points
+                        self.combo_display_timer = 0.6  # pulse duration
+
+                        # Milestone effects
+                        if self.combo_counter == COMBO_TIER1_THRESHOLD:
+                            self.particles.emit_combo_tier1(
+                                self.player.pos_x, self.player.pos_y)
+                            self.player.combo_tier = 1
+                        elif self.combo_counter == COMBO_TIER2_THRESHOLD:
+                            self.particles.emit_combo_tier2(
+                                self.player.pos_x, self.player.pos_y)
+                            self.player.combo_tier = 2
+                        elif self.combo_counter < COMBO_TIER1_THRESHOLD:
+                            self.player.combo_tier = 0
+
                         self._play_sound("explode")
                         self.enemy_manager.on_enemy_killed()
                         leveled = self.player.gain_xp(enemy.xp_value)
@@ -944,7 +1032,11 @@ class Game:
             self.particles.draw(surface, self.camera)
 
             wave_info = self.enemy_manager.wave_info
-            self.ui.draw_hud(surface, self.player, wave_info, self.fps)
+            self.ui.draw_hud(surface, self.player, wave_info, self.fps,
+                             score=self.score,
+                             combo=self.combo_counter,
+                             combo_timer=self.combo_timer,
+                             combo_display_timer=self.combo_display_timer)
 
             # Mini-map
             powerup_list = self.powerup_manager.powerups if self.powerup_manager else []
@@ -970,4 +1062,5 @@ class Game:
                 self.ui.draw_upgrade_screen(surface, self.upgrade_options, self.player)
                 self._check_hover_sound()
             elif self.state == GameState.GAME_OVER:
-                self.ui.draw_game_over(surface, self.player, wave_info)
+                self.ui.draw_game_over(surface, self.player, wave_info,
+                                       score=self.score)

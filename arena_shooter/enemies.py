@@ -1,5 +1,5 @@
-"""
-enemies.py - Enemy types: Chaser, Shooter, Tank, Boss, SniperBoss, SlimeBoss
+"""enemies.py - Enemy types: Chaser, Shooter, Tank, Boss, SniperBoss, SlimeBoss,
+                       SuicideBomber, ShieldGuard
 All drawing uses camera.s() for native-resolution rendering.
 """
 
@@ -32,6 +32,11 @@ from .settings import (
     SLIME_BOSS_TRAIL_LIFETIME, SLIME_BOSS_TRAIL_RADIUS,
     SLIME_BOSS_JUMP_COOLDOWN, SLIME_BOSS_JUMP_SPEED, SLIME_BOSS_JUMP_DURATION,
     SLIME_BOSS_SHOCKWAVE_RADIUS, SLIME_BOSS_SHOCKWAVE_DAMAGE,
+    BOMBER_SPEED, BOMBER_HP, BOMBER_SIZE, BOMBER_DAMAGE, BOMBER_XP, BOMBER_COLOR,
+    BOMBER_PRIME_RANGE, BOMBER_PRIME_DURATION, BOMBER_EXPLOSION_RADIUS,
+    BOMBER_TURN_RATE,
+    SHIELD_GUARD_SPEED, SHIELD_GUARD_HP, SHIELD_GUARD_SIZE, SHIELD_GUARD_DAMAGE,
+    SHIELD_GUARD_XP, SHIELD_GUARD_COLOR, SHIELD_GUARD_ARC, SHIELD_GUARD_TURN_RATE,
 )
 from .projectiles import EnemyBullet
 
@@ -831,3 +836,235 @@ class SlimeBoss(Enemy):
                                    (sw_r, sw_r), sw_r, max(1, sc(3)))
                 surface.blit(sw_surf, (sx - sw_r, sy - sw_r))
 
+
+class SuicideBomber(Enemy):
+    """High-speed fragile enemy that primes and explodes near the player."""
+
+    def __init__(self, x, y, hp_multiplier=1.0, speed_multiplier=1.0, damage_multiplier=1.0):
+        super().__init__(
+            x, y,
+            speed=BOMBER_SPEED * speed_multiplier,
+            hp=int(BOMBER_HP * hp_multiplier),
+            size=BOMBER_SIZE,
+            damage=int(BOMBER_DAMAGE * damage_multiplier),
+            xp=BOMBER_XP,
+            color=BOMBER_COLOR,
+        )
+        self.is_priming = False
+        self.prime_timer = 0.0
+        # Facing angle (direction it's moving/looking)
+        self.facing_angle = 0.0
+        # Signals read by game.py
+        self.exploded = False
+        self.explosion_radius = BOMBER_EXPLOSION_RADIUS
+
+    def update(self, dt, player_x, player_y, enemy_bullets=None):
+        dx = player_x - self.pos_x
+        dy = player_y - self.pos_y
+        dist = math.sqrt(dx * dx + dy * dy)
+
+        if self.is_priming:
+            self.prime_timer -= dt
+            if self.prime_timer <= 0:
+                # Signal game.py to apply AOE — game.py will call kill()
+                self.exploded = True
+                return
+        else:
+            # Rush toward the player with limited turn rate
+            if dist > 0:
+                # Desired angle to player
+                target_angle = math.atan2(dy, dx)
+                
+                # Calculate shortest angular distance (wrap to -pi..pi)
+                angle_diff = (target_angle - self.facing_angle + math.pi) % (2 * math.pi) - math.pi
+                
+                # Limit rotation by turn rate
+                max_turn = BOMBER_TURN_RATE * dt
+                if abs(angle_diff) <= max_turn:
+                    self.facing_angle = target_angle
+                else:
+                    self.facing_angle += max_turn if angle_diff > 0 else -max_turn
+                
+                # Move in current facing direction
+                ndx = math.cos(self.facing_angle)
+                ndy = math.sin(self.facing_angle)
+                wobble = math.sin(pygame.time.get_ticks() * 0.007 + self.wobble_offset) * 0.25
+                perp_x = -ndy * wobble
+                perp_y = ndx * wobble
+                self.pos_x += (ndx + perp_x) * self.speed * dt
+                self.pos_y += (ndy + perp_y) * self.speed * dt
+
+            # Start priming when close enough
+            if dist < BOMBER_PRIME_RANGE:
+                self.is_priming = True
+                self.prime_timer = BOMBER_PRIME_DURATION
+
+        super().update(dt, player_x, player_y)
+
+    def _draw_shape(self, surface, sx, sy, color, camera):
+        """Draw as a small circle with spikes. Flash red while priming."""
+        r = camera.s(self.radius)
+        sc = camera.s
+
+        if self.is_priming:
+            # Rapid flash between red and white
+            flash = int(self.prime_timer * 16) % 2 == 0
+            draw_color = WHITE if flash else NEON_RED
+            # Pulsing priming glow
+            prime_progress = 1.0 - (self.prime_timer / BOMBER_PRIME_DURATION)
+            glow_r = int(r * (1.3 + 0.7 * prime_progress))
+            if glow_r > 0:
+                glow_surf = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
+                glow_alpha = int(60 + 120 * prime_progress)
+                pygame.draw.circle(glow_surf, (*NEON_RED, glow_alpha),
+                                   (glow_r, glow_r), glow_r)
+                surface.blit(glow_surf, (sx - glow_r, sy - glow_r))
+        else:
+            draw_color = color
+
+        # Core body
+        pygame.draw.circle(surface, draw_color, (sx, sy), r, max(1, sc(2)))
+
+        # Inner fill
+        inner_r = r - sc(2)
+        if inner_r > 0:
+            inner_surf = pygame.Surface((inner_r * 2, inner_r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(inner_surf, (*color, 70), (inner_r, inner_r), inner_r)
+            surface.blit(inner_surf, (sx - inner_r, sy - inner_r))
+
+        # Spikes (4 pointed projections)
+        spike_len = r + sc(6)
+        for i in range(4):
+            angle = i * math.pi / 2 + pygame.time.get_ticks() * 0.005
+            tip_x = sx + math.cos(angle) * spike_len
+            tip_y = sy + math.sin(angle) * spike_len
+            pygame.draw.line(surface, draw_color, (sx, sy),
+                             (int(tip_x), int(tip_y)), max(1, sc(1)))
+
+        # Danger icon (exclamation mark when priming)
+        if self.is_priming:
+            exc = "!"
+            try:
+                font = pygame.font.SysFont("consolas", max(8, sc(14)), bold=True)
+            except Exception:
+                font = pygame.font.Font(None, max(8, sc(14)))
+            exc_surf = font.render(exc, True, NEON_RED)
+            exc_rect = exc_surf.get_rect(center=(sx, sy - r - sc(10)))
+            surface.blit(exc_surf, exc_rect)
+
+
+class ShieldGuard(Enemy):
+    """Slow tank with a directional front shield immune to frontal bullets."""
+
+    def __init__(self, x, y, hp_multiplier=1.0, speed_multiplier=1.0, damage_multiplier=1.0):
+        super().__init__(
+            x, y,
+            speed=SHIELD_GUARD_SPEED * speed_multiplier,
+            hp=int(SHIELD_GUARD_HP * hp_multiplier),
+            size=SHIELD_GUARD_SIZE,
+            damage=int(SHIELD_GUARD_DAMAGE * damage_multiplier),
+            xp=SHIELD_GUARD_XP,
+            color=SHIELD_GUARD_COLOR,
+        )
+        # The angle the guard is facing (toward the player)
+        self.facing_angle = 0.0
+        self.shield_arc = SHIELD_GUARD_ARC  # full arc width in radians
+
+    def is_bullet_shielded(self, bullet_angle):
+        """Return True if a bullet coming from bullet_angle hits the front shield.
+
+        bullet_angle is the angle FROM the guard center TO the bullet,
+        i.e. the direction the bullet is located relative to the guard.
+        The shield blocks bullets arriving from the guard facing direction.
+        """
+        # Angle difference (wrap to -pi..pi)
+        diff = (bullet_angle - self.facing_angle + math.pi) % (2 * math.pi) - math.pi
+        return abs(diff) <= self.shield_arc / 2
+
+    def take_damage(self, amount, particle_system, from_angle=None):
+        """Override: if from_angle is provided and shielded, block damage."""
+        if from_angle is not None and self.is_bullet_shielded(from_angle):
+            # Shield sparks — bullet deflected
+            particle_system.emit(self.pos_x, self.pos_y, NEON_CYAN, count=6,
+                                 speed_range=(80, 200), lifetime_range=(0.1, 0.25))
+            return False
+        return super().take_damage(amount, particle_system)
+
+    def update(self, dt, player_x, player_y, enemy_bullets=None):
+        dx = player_x - self.pos_x
+        dy = player_y - self.pos_y
+        dist = math.sqrt(dx * dx + dy * dy)
+
+        if dist > 0:
+            # Desired angle to player
+            target_angle = math.atan2(dy, dx)
+            
+            # Calculate shortest angular distance (wrap to -pi..pi)
+            angle_diff = (target_angle - self.facing_angle + math.pi) % (2 * math.pi) - math.pi
+            
+            # Limit rotation by turn rate
+            max_turn = SHIELD_GUARD_TURN_RATE * dt
+            if abs(angle_diff) <= max_turn:
+                self.facing_angle = target_angle
+            else:
+                self.facing_angle += max_turn if angle_diff > 0 else -max_turn
+            
+            # Move in current facing direction
+            ndx = math.cos(self.facing_angle)
+            ndy = math.sin(self.facing_angle)
+            self.pos_x += ndx * self.speed * dt
+            self.pos_y += ndy * self.speed * dt
+
+        super().update(dt, player_x, player_y)
+
+    def _draw_shape(self, surface, sx, sy, color, camera):
+        """Draw as a hexagonal body with a visible shield arc on the front."""
+        r = camera.s(self.radius)
+        sc = camera.s
+
+        # Body: hexagon
+        points = []
+        for i in range(6):
+            angle = self.facing_angle + math.pi / 6 + i * math.pi / 3
+            px = sx + math.cos(angle) * r
+            py = sy + math.sin(angle) * r
+            points.append((int(px), int(py)))
+        pygame.draw.polygon(surface, color, points, max(1, sc(2)))
+
+        # Inner fill
+        pad = r + sc(2)
+        inner_surf = pygame.Surface((pad * 2, pad * 2), pygame.SRCALPHA)
+        shifted = [(p[0] - sx + pad, p[1] - sy + pad) for p in points]
+        pygame.draw.polygon(inner_surf, (*color, 50), shifted)
+        surface.blit(inner_surf, (sx - pad, sy - pad))
+
+        # Shield arc (thick bright arc on the front)
+        shield_r = r + sc(8)
+        half_arc = self.shield_arc / 2
+        num_segs = 12
+        # Draw as a series of connected line segments
+        arc_points = []
+        for i in range(num_segs + 1):
+            frac = i / num_segs
+            angle = self.facing_angle - half_arc + frac * self.shield_arc
+            ax = sx + math.cos(angle) * shield_r
+            ay = sy + math.sin(angle) * shield_r
+            arc_points.append((int(ax), int(ay)))
+
+        # Pulsing shield alpha
+        pulse = 0.6 + 0.4 * math.sin(pygame.time.get_ticks() * 0.006)
+        shield_alpha = int(180 * pulse)
+
+        if len(arc_points) >= 2:
+            # Draw thick arc segments
+            line_w = max(2, sc(4))
+            shield_line_surf = pygame.Surface(
+                (shield_r * 2 + sc(12), shield_r * 2 + sc(12)), pygame.SRCALPHA)
+            offset = shield_r + sc(6)
+            shifted_arc = [(p[0] - sx + offset, p[1] - sy + offset) for p in arc_points]
+            pygame.draw.lines(shield_line_surf, (*NEON_CYAN, shield_alpha),
+                              False, shifted_arc, line_w)
+            surface.blit(shield_line_surf, (sx - offset, sy - offset))
+
+        # Center eye
+        pygame.draw.circle(surface, color, (sx, sy), max(1, r // 3))

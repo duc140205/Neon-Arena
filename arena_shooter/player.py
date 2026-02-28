@@ -101,6 +101,9 @@ class Player(pygame.sprite.Sprite):
         # Railgun power-up buff
         self.railgun_timer = 0.0      # seconds of railgun mode remaining
 
+        # Combo visual tier (0=normal, 1=x5, 2=x10) — set by game.py
+        self.combo_tier = 0
+
         # Shooting state flag (cleared when focus is lost)
         self.is_shooting = False
 
@@ -374,14 +377,26 @@ class Player(pygame.sprite.Sprite):
         sc = camera.s  # shorthand for scaling
 
         # ── Glow ──
+        # Combo-tier glow color override
+        if self.combo_tier >= 2:
+            glow_base_color = NEON_MAGENTA
+        elif self.combo_tier >= 1:
+            glow_base_color = NEON_ORANGE
+        else:
+            glow_base_color = NEON_CYAN
+
         glow_r = sc(self.radius + 12)
         glow_surf = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
         glow_alpha = 30
+        if self.combo_tier >= 2:
+            glow_alpha = 55 + int(20 * abs(math.sin(pygame.time.get_ticks() * 0.008)))
+        elif self.combo_tier >= 1:
+            glow_alpha = 45
         if self.is_dashing:
             glow_alpha = 60
         if self.invincible_timer > 0:
             glow_alpha = 15 + int(45 * abs(math.sin(self.invincible_timer * 15)))
-        pygame.draw.circle(glow_surf, (*NEON_CYAN, glow_alpha),
+        pygame.draw.circle(glow_surf, (*glow_base_color, glow_alpha),
                            (glow_r, glow_r), glow_r)
         surface.blit(glow_surf, (sx - glow_r, sy - glow_r))
 

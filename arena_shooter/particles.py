@@ -6,7 +6,10 @@ Drawing uses camera.s() for native-resolution rendering.
 import pygame
 import math
 import random
-from .settings import MAX_PARTICLES, NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_YELLOW, NEON_ORANGE
+from .settings import (
+    MAX_PARTICLES, NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_YELLOW, NEON_ORANGE,
+    NEON_GREEN, NEON_PURPLE,
+)
 
 
 class Particle:
@@ -182,6 +185,45 @@ class ParticleSystem:
             vy = math.sin(spark_angle) * speed
             p.init(x, y, vx, vy, random.uniform(0.1, 0.25),
                    NEON_ORANGE, random.uniform(1, 3))
+
+    def emit_combo_tier1(self, x, y):
+        """x5 combo burst — fast orange/yellow starburst ring."""
+        for i in range(20):
+            angle = (i / 20) * math.pi * 2
+            speed = random.uniform(120, 280)
+            p = self._get_particle()
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            color = random.choice([NEON_ORANGE, NEON_YELLOW])
+            p.init(x, y, vx, vy, random.uniform(0.3, 0.7),
+                   color, random.uniform(3, 6))
+
+    def emit_combo_tier2(self, x, y):
+        """x10 combo explosion — intense magenta/cyan double-ring."""
+        # Inner fast ring
+        for i in range(24):
+            angle = (i / 24) * math.pi * 2
+            speed = random.uniform(200, 400)
+            p = self._get_particle()
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            color = random.choice([NEON_MAGENTA, NEON_CYAN, NEON_YELLOW])
+            p.init(x, y, vx, vy, random.uniform(0.4, 0.9),
+                   color, random.uniform(4, 8))
+        # Outer slower ring
+        for i in range(16):
+            angle = (i / 16) * math.pi * 2 + 0.15
+            speed = random.uniform(80, 180)
+            p = self._get_particle()
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed
+            bright = (
+                min(255, NEON_MAGENTA[0] + 60),
+                min(255, NEON_MAGENTA[1] + 60),
+                min(255, NEON_MAGENTA[2] + 60),
+            )
+            p.init(x, y, vx, vy, random.uniform(0.5, 1.0),
+                   bright, random.uniform(3, 5), fade=True, shrink=False)
 
     def update(self, dt):
         for p in self.pool:

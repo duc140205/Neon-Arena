@@ -111,6 +111,12 @@ RAILGUN_BULLET_SPEED = 1200       # faster than normal bullets
 RAILGUN_DAMAGE_MULT = 1.5         # damage multiplier over current bullet_damage
 RAILGUN_SIZE = 8                  # slightly larger bullet
 
+# Score & Combo system
+COMBO_WINDOW = 2.0                # seconds before combo resets to 0
+SCORE_MULTIPLIER = 1.0            # global score scaling factor
+COMBO_TIER1_THRESHOLD = 5         # x5 combo milestone
+COMBO_TIER2_THRESHOLD = 10        # x10 combo milestone
+
 # ── Enemy Settings ───────────────────────────────────────
 # Chaser
 CHASER_SPEED = 150
@@ -218,6 +224,30 @@ SHOOTER_FAN_SPREAD = 0.35          # radians total spread
 TANK_SHIELD_COOLDOWN = 8.0         # seconds between shields
 TANK_SHIELD_DURATION = 3.0         # seconds shield lasts
 TANK_SHIELD_REDUCTION = 0.7        # damage reduced (70% reduction)
+
+# SuicideBomber
+BOMBER_SPEED = 220                 # fast approach
+BOMBER_HP = 30                     # fragile
+BOMBER_SIZE = 14                   # small
+BOMBER_DAMAGE = 60                 # explosion damage to player
+BOMBER_XP = 35
+BOMBER_COLOR = NEON_YELLOW
+BOMBER_PRIME_RANGE = 60            # distance to start priming
+BOMBER_PRIME_DURATION = 1.0        # seconds of flashing before boom
+BOMBER_EXPLOSION_RADIUS = 120      # AOE radius of the detonation
+BOMBER_SPAWN_WAVE = 5              # first wave they can appear
+BOMBER_TURN_RATE = 4.0             # radians per second turning speed
+
+# ShieldGuard
+SHIELD_GUARD_SPEED = 45            # very slow
+SHIELD_GUARD_HP = 250              # tanky
+SHIELD_GUARD_SIZE = 26             # large
+SHIELD_GUARD_DAMAGE = 15           # melee contact damage
+SHIELD_GUARD_XP = 55
+SHIELD_GUARD_COLOR = NEON_CYAN
+SHIELD_GUARD_ARC = math.radians(120)  # front shield arc (120 degrees)
+SHIELD_GUARD_SPAWN_WAVE = 8       # first wave they can appear
+SHIELD_GUARD_TURN_RATE = 2.5      # radians per second turning speed
 
 # ── Upgrades ─────────────────────────────────────────────
 UPGRADES = {

@@ -16,6 +16,7 @@ from .settings import (
     HP_BAR, HP_BAR_BG, XP_BAR, XP_BAR_BG,
     UPGRADES,
     POWERUP_TYPES,
+    COMBO_WINDOW, COMBO_TIER1_THRESHOLD, COMBO_TIER2_THRESHOLD,
 )
 
 
@@ -67,7 +68,8 @@ class UI:
         """Scale a base-720p pixel value to current resolution."""
         return max(1, int(pixels * self.scale))
 
-    def draw_hud(self, surface, player, wave_info, fps):
+    def draw_hud(self, surface, player, wave_info, fps, *,
+                  score=0, combo=0, combo_timer=0.0, combo_display_timer=0.0):
         """Draw the in-game HUD overlay."""
         s = self._s
         W, H = self.W, self.H
@@ -138,6 +140,50 @@ class UI:
         fps_text = self.font_tiny.render(f"FPS: {fps:.0f}", True, fps_color)
         fr = fps_text.get_rect(topright=(W - s(20), s(100)))
         surface.blit(fps_text, fr)
+
+        # ── Score (below FPS, right-aligned) ──
+        score_text = self.font_medium.render(f"SCORE {score}", True, NEON_YELLOW)
+        sr = score_text.get_rect(topright=(W - s(20), s(120)))
+        surface.blit(score_text, sr)
+
+        # ── Combo Meter ──
+        if combo >= 2:
+            # Pick color by tier
+            if combo >= COMBO_TIER2_THRESHOLD:
+                combo_color = NEON_MAGENTA
+            elif combo >= COMBO_TIER1_THRESHOLD:
+                combo_color = NEON_ORANGE
+            else:
+                combo_color = NEON_YELLOW
+
+            # Pulsing scale on fresh kills
+            if combo_display_timer > 0:
+                pulse = 1.0 + 0.25 * abs(math.sin(combo_display_timer * 12))
+            else:
+                pulse = 1.0
+
+            combo_label = f"COMBO x{combo}"
+            combo_font_size = max(10, int(26 * self.scale * pulse))
+            try:
+                cfont = pygame.font.SysFont("consolas", combo_font_size, bold=True)
+            except Exception:
+                cfont = pygame.font.Font(None, combo_font_size)
+            combo_surf = cfont.render(combo_label, True, combo_color)
+            cr = combo_surf.get_rect(topright=(W - s(20), s(150)))
+            surface.blit(combo_surf, cr)
+
+            # Decay bar under the combo text
+            bar_w_combo = s(120)
+            bar_h_combo = s(4)
+            bar_x_combo = cr.right - bar_w_combo
+            bar_y_combo = cr.bottom + s(3)
+            ratio = max(0.0, combo_timer / COMBO_WINDOW)
+            self._draw_rounded_bar(surface, bar_x_combo, bar_y_combo,
+                                   bar_w_combo, bar_h_combo, DARK_GRAY)
+            if ratio > 0:
+                self._draw_rounded_bar(surface, bar_x_combo, bar_y_combo,
+                                       int(bar_w_combo * ratio), bar_h_combo,
+                                       combo_color)
 
     def draw_minimap(self, surface, player, obstacles, powerups, enemies, boss=None):
         """Draw a minimap overlay in the bottom-right corner."""
@@ -350,7 +396,7 @@ class UI:
                 break
         self.hovered_id = hovered_upgrade
 
-    def draw_game_over(self, surface, player, wave_info):
+    def draw_game_over(self, surface, player, wave_info, *, score=0):
         W, H = self.W, self.H
         s = self._s
 
@@ -363,13 +409,14 @@ class UI:
         surface.blit(title, title_rect)
 
         stats = [
+            f"Score: {score}",
             f"Wave Reached: {wave_info['wave']}",
             f"Total Kills: {wave_info['total_killed']}",
             f"Level: {player.level}",
         ]
         for i, stat in enumerate(stats):
             text = self.font_medium.render(stat, True, NEON_CYAN)
-            rect = text.get_rect(center=(W // 2, H // 2 + i * s(40)))
+            rect = text.get_rect(center=(W // 2, H // 2 - s(20) + i * s(40)))
             surface.blit(text, rect)
 
         restart = self.font_small.render("[R] Restart  |  [ESC] Quit", True, GRAY)
