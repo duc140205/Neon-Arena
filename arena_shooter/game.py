@@ -1037,10 +1037,11 @@ class Game:
                 f"{self.trial_type.upper()} AUGMENT UNLOCKED!"
             )
             self._play_sound("levelup")
-            # Celebration particles
+            # Celebration particles with synergy colours
             self.particles.emit_neon_pulse(
                 self.player.pos_x, self.player.pos_y,
-                200, augmented=True)
+                200, augmented=True,
+                upgrades=self.player.ult_upgrades)
 
     def _on_trial_damage(self):
         """Called when the player takes damage during an active trial.

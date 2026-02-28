@@ -8,7 +8,7 @@ import math
 import random
 from .settings import (
     MAX_PARTICLES, NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_YELLOW, NEON_ORANGE,
-    NEON_GREEN, NEON_PURPLE,
+    NEON_GREEN, NEON_PURPLE, NEON_RED,
 )
 
 
@@ -225,19 +225,37 @@ class ParticleSystem:
             p.init(x, y, vx, vy, random.uniform(0.5, 1.0),
                    bright, random.uniform(3, 5), fade=True, shrink=False)
 
-    def emit_neon_pulse(self, x, y, radius, augmented=False):
+    def emit_neon_pulse(self, x, y, radius, augmented=False, upgrades=None):
         """Radial blast ring for the Neon Pulse ultimate ability.
 
         Creates a dramatic expanding ring of particles with inner burst.
-        If augmented is True, uses brighter colors and more particles.
+        *upgrades* is a dict like {'sniper': bool, 'slime': bool, 'tank': bool}.
+        When multiple augments are active the palette combines their
+        signature colours so the player sees their true stacked power.
         """
-        ring_count = 48 if augmented else 32
-        burst_count = 30 if augmented else 20
+        if upgrades is None:
+            upgrades = {}
+
+        # Build the colour palette from active augments
+        active_count = sum(1 for v in upgrades.values() if v)
+        base_palette = [NEON_CYAN, NEON_MAGENTA, NEON_PURPLE]
+
+        # Per-augment signature colours
+        aug_palette = list(base_palette)  # always keep the base
+        if upgrades.get('sniper'):
+            aug_palette.extend([NEON_CYAN, (100, 220, 255)])  # bright cyan
+        if upgrades.get('slime'):
+            aug_palette.extend([NEON_GREEN, (80, 255, 120)])   # toxic green
+        if upgrades.get('tank'):
+            aug_palette.extend([NEON_RED, NEON_ORANGE])        # fiery red/orange
+
+        # More particles for each stacked augment
+        ring_count = 32 + active_count * 8
+        burst_count = 20 + active_count * 6
 
         # Expanding ring (particles move outward at ring edge)
         for i in range(ring_count):
             angle = (i / ring_count) * math.pi * 2
-            # Place particles along the ring at ~60% radius, moving outward
             start_dist = radius * 0.3
             px = x + math.cos(angle) * start_dist
             py = y + math.sin(angle) * start_dist
@@ -245,9 +263,7 @@ class ParticleSystem:
             p = self._get_particle()
             vx = math.cos(angle) * speed
             vy = math.sin(angle) * speed
-            color = random.choice([NEON_CYAN, NEON_MAGENTA, NEON_PURPLE])
-            if augmented:
-                color = random.choice([NEON_CYAN, NEON_MAGENTA, NEON_YELLOW, NEON_PURPLE])
+            color = random.choice(aug_palette)
             p.init(px, py, vx, vy, random.uniform(0.5, 1.2),
                    color, random.uniform(4, 9))
 
@@ -258,7 +274,7 @@ class ParticleSystem:
             p = self._get_particle()
             vx = math.cos(angle) * speed
             vy = math.sin(angle) * speed
-            color = random.choice([NEON_CYAN, NEON_MAGENTA])
+            color = random.choice(aug_palette)
             bright = (
                 min(255, color[0] + 100),
                 min(255, color[1] + 100),
@@ -267,14 +283,16 @@ class ParticleSystem:
             p.init(x, y, vx, vy, random.uniform(0.3, 0.8),
                    bright, random.uniform(3, 6))
 
-        # Flash ring at full radius
-        for i in range(16):
-            angle = (i / 16) * math.pi * 2
+        # Flash ring at full radius — use augment colours
+        flash_count = 16 + active_count * 4
+        for i in range(flash_count):
+            angle = (i / flash_count) * math.pi * 2
             px = x + math.cos(angle) * radius
             py = y + math.sin(angle) * radius
             p = self._get_particle()
             p.init(px, py, 0, 0, random.uniform(0.3, 0.6),
-                   NEON_CYAN, random.uniform(5, 10), fade=True, shrink=True)
+                   random.choice(aug_palette),
+                   random.uniform(5, 10), fade=True, shrink=True)
 
     def update(self, dt):
         for p in self.pool:

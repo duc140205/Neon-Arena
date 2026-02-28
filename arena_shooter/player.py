@@ -146,10 +146,11 @@ class Player(pygame.sprite.Sprite):
         if self.ult_upgrades['tank']:
             self.invincible_timer = max(self.invincible_timer, ULT_TANK_INVINCIBILITY)
 
-        # Visual: emit the radial blast particles
-        augmented = any(self.ult_upgrades.values())
+        # Visual: emit the radial blast particles with synergy colours
         self.particles.emit_neon_pulse(
-            self.pos_x, self.pos_y, ULT_PULSE_RADIUS, augmented=augmented)
+            self.pos_x, self.pos_y, ULT_PULSE_RADIUS,
+            augmented=any(self.ult_upgrades.values()),
+            upgrades=self.ult_upgrades)
         return True
 
     @property
