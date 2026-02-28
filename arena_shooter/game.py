@@ -28,7 +28,9 @@ from .settings import (
     ULT_TOXIC_POOL_COUNT, ULT_TOXIC_POOL_DAMAGE,
     ULT_TOXIC_POOL_LIFETIME, ULT_TOXIC_POOL_RADIUS,
     ULT_TANK_PUSHBACK_MULT,
-    TRIAL_KILL_TARGET,
+    TRIAL_KILL_TARGET, TRIAL_EASY_KILL_TARGET,
+    TRIAL_TIME_LIMIT, TRIAL_START_INVINCIBILITY,
+    ULT_SPEED_BOOST_MULT, ULT_SPEED_BOOST_DURATION,
 )
 from .obstacles import generate_obstacles, PowerUpManager
 from .config import Config, resource_path, assets
@@ -128,9 +130,11 @@ class Game:
         # ── Trial Mode (Ultimate Skill Challenges) ───────
         self.trial_active = False
         self.trial_type = None         # 'sniper', 'slime', or 'tank'
-        self.trial_kills = 0           # kills without taking damage
+        self.trial_kills = 0
         self.trial_target = TRIAL_KILL_TARGET
         self.trial_failed = False
+        self.trial_took_damage = False   # tracks if player took damage during trial
+        self.trial_timer = 0.0           # countdown for timed path
         self.trial_notification_timer = 0.0  # shows "Trial Started/Failed/Complete" text
         self.trial_notification_text = ""
 
@@ -447,6 +451,8 @@ class Game:
         self.trial_type = None
         self.trial_kills = 0
         self.trial_failed = False
+        self.trial_took_damage = False
+        self.trial_timer = 0.0
         self.trial_notification_timer = 0.0
         self.trial_notification_text = ""
 
@@ -649,19 +655,25 @@ class Game:
         # Mouse is in native screen pixels — pass directly
         mouse_pos = pygame.mouse.get_pos()
 
+        # ── Speed boosts — applied before movement so player.update sees them ──
+        saved_speed = self.player.speed
+        speed_mult = 1.0
+        if self.player.speed_boost_timer > 0:
+            speed_mult = max(speed_mult, SPEED_BOOST_MULT)
+        if self.player.ult_speed_boost_timer > 0:
+            speed_mult = max(speed_mult, ULT_SPEED_BOOST_MULT)
+            self.player.ult_speed_boost_timer = max(
+                0.0, self.player.ult_speed_boost_timer - dt)
+        if speed_mult > 1.0:
+            self.player.speed = saved_speed * speed_mult
+
         self.player.update(dt, mouse_pos, self.camera)
 
-        # Speed boost powerup
-        saved_speed = self.player.speed
-        if self.player.speed_boost_timer > 0:
-            self.player.speed = saved_speed * SPEED_BOOST_MULT
+        # Restore base speed so it never permanently drifts
+        self.player.speed = saved_speed
 
         if self.player.try_shoot(self.player_bullets):
             self._play_sound("shoot")
-
-        # Restore speed after shooting calc (it's used live during update)
-        if self.player.speed_boost_timer > 0:
-            self.player.speed = saved_speed
 
         self.camera.update(self.player.pos_x, self.player.pos_y, dt)
 
@@ -873,6 +885,23 @@ class Game:
         if self.trial_notification_timer > 0:
             self.trial_notification_timer -= dt
 
+        # ── Trial countdown timer ──
+        if self.trial_active and not self.trial_failed:
+            self.trial_timer -= dt
+            if self.trial_timer <= 0:
+                self.trial_timer = 0
+                # Time's up — check if untouched path is still viable
+                if self.trial_took_damage:
+                    # Both paths failed
+                    self.trial_failed = True
+                    self.trial_active = False
+                    self.trial_kills = 0
+                    self.trial_notification_timer = 3.0
+                    self.trial_notification_text = (
+                        "TRIAL FAILED! Defeat another boss for a new artifact.")
+                # If untouched path still viable, trial continues until
+                # player either reaches TRIAL_EASY_KILL_TARGET or takes damage
+
         self.particles.update(dt)
         self._check_collisions()
 
@@ -919,12 +948,9 @@ class Game:
                 # 3-second slow
                 enemy.apply_slow(ULT_SLOW_DURATION, ULT_SLOW_FACTOR)
 
-        # Destroy enemy bullets in radius
+        # Destroy ALL enemy bullets (wide-area clear)
         for bullet in list(self.enemy_bullets):
-            bdx = bullet.pos_x - px
-            bdy = bullet.pos_y - py
-            if math.sqrt(bdx * bdx + bdy * bdy) < radius:
-                bullet.kill()
+            bullet.kill()
 
         # Sniper augment: fire auto-aiming lasers at nearest enemies
         if self.player.ult_upgrades['sniper']:
@@ -962,40 +988,79 @@ class Game:
     # ── Trial Mode (Challenge System) ────────────────────
 
     def _start_trial(self, trial_type):
-        """Begin a trial challenge for unlocking an ultimate augmentation."""
+        """Begin a trial challenge for unlocking an ultimate augmentation.
+
+        Dual-path completion:
+          - Timed path:     Kill 10 enemies within 15 seconds
+          - Untouched path: Kill 5 enemies without taking any damage
+        Player also receives a brief invincibility bubble at trial start.
+        """
         self.trial_active = True
         self.trial_type = trial_type
         self.trial_kills = 0
         self.trial_failed = False
-        self.trial_notification_timer = 3.0
-        self.trial_notification_text = f"TRIAL: {trial_type.upper()} — Kill {self.trial_target} without taking damage!"
+        self.trial_took_damage = False
+        self.trial_timer = TRIAL_TIME_LIMIT
+        # Grant invincibility bubble at trial start
+        if self.player:
+            self.player.invincible_timer = max(
+                self.player.invincible_timer, TRIAL_START_INVINCIBILITY)
+        self.trial_notification_timer = 4.0
+        self.trial_notification_text = (
+            f"TRIAL: {trial_type.upper()} — "
+            f"{TRIAL_KILL_TARGET} kills in {TRIAL_TIME_LIMIT:.0f}s  OR  "
+            f"{TRIAL_EASY_KILL_TARGET} kills untouched!"
+        )
 
     def _on_trial_kill(self):
         """Called when an enemy is killed during an active trial."""
         if not self.trial_active or self.trial_failed:
             return
         self.trial_kills += 1
-        if self.trial_kills >= self.trial_target:
+
+        # Check dual completion paths:
+        #  1) Timed path:     TRIAL_KILL_TARGET kills within the time limit
+        #  2) Untouched path: TRIAL_EASY_KILL_TARGET kills with zero damage taken
+        timed_done = (self.trial_kills >= TRIAL_KILL_TARGET
+                      and self.trial_timer > 0)
+        untouched_done = (self.trial_kills >= TRIAL_EASY_KILL_TARGET
+                          and not self.trial_took_damage)
+
+        if timed_done or untouched_done:
             # Trial complete — unlock augmentation
             self.player.ult_upgrades[self.trial_type] = True
             self.trial_active = False
+            path_label = "TIMED" if timed_done and not untouched_done else "UNTOUCHED"
             self.trial_notification_timer = 4.0
-            self.trial_notification_text = f"TRIAL COMPLETE! {self.trial_type.upper()} AUGMENT UNLOCKED!"
+            self.trial_notification_text = (
+                f"TRIAL COMPLETE ({path_label})! "
+                f"{self.trial_type.upper()} AUGMENT UNLOCKED!"
+            )
             self._play_sound("levelup")
-            # Celebration particles
+            # Celebration particles with synergy colours
             self.particles.emit_neon_pulse(
                 self.player.pos_x, self.player.pos_y,
-                200, augmented=True)
+                200, augmented=True,
+                upgrades=self.player.ult_upgrades)
 
     def _on_trial_damage(self):
-        """Called when the player takes damage during an active trial."""
+        """Called when the player takes damage during an active trial.
+
+        Damage does NOT instantly fail the trial — it only disables the
+        untouched path.  The timed path (10 kills in 15s) stays active.
+        If the timer has already expired, both paths are dead → fail.
+        """
         if not self.trial_active or self.trial_failed:
             return
-        self.trial_failed = True
-        self.trial_active = False
-        self.trial_kills = 0
-        self.trial_notification_timer = 3.0
-        self.trial_notification_text = "TRIAL FAILED! Defeat another boss for a new artifact."
+        self.trial_took_damage = True
+        # If timer already expired, both paths are now dead
+        if self.trial_timer <= 0:
+            self.trial_failed = True
+            self.trial_active = False
+            self.trial_kills = 0
+            self.trial_notification_timer = 3.0
+            self.trial_notification_text = (
+                "TRIAL FAILED! Defeat another boss for a new artifact.")
 
     def _award_boss_artifact(self, boss):
         """Award a boss artifact based on the boss type, then start the trial."""
@@ -1240,6 +1305,9 @@ class Game:
                     "notification_timer": self.trial_notification_timer,
                     "notification_text": self.trial_notification_text,
                     "failed": self.trial_failed,
+                    "timer": self.trial_timer,
+                    "took_damage": self.trial_took_damage,
+                    "easy_target": TRIAL_EASY_KILL_TARGET,
                 }
                 self.ui.draw_trial_progress(surface, trial_info)
 
