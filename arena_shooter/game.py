@@ -21,7 +21,7 @@ from .settings import (
     SLIME_BOSS_SHOCKWAVE_DAMAGE,
 )
 from .obstacles import generate_obstacles, PowerUpManager
-from .config import Config, resource_path
+from .config import Config, resource_path, assets
 from .player import Player
 from .particles import ParticleSystem
 from .camera import Camera
@@ -67,7 +67,7 @@ class Game:
 
         # ── Window / Taskbar Icon ────────────────────────
         try:
-            icon_path = resource_path(os.path.join("assets", "neonarena.ico"))
+            icon_path = assets.icon("neonarena.ico")
             if os.path.exists(icon_path):
                 icon_surface = pygame.image.load(icon_path)
                 pygame.display.set_icon(icon_surface)

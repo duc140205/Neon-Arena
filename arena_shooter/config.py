@@ -215,3 +215,58 @@ class Config:
             f"mode={self.screen_mode}, "
             f"fps={self.fps}, vsync={self.vsync})"
         )
+
+
+# ── Asset path helpers ────────────────────────────────────────────────────────
+
+class AssetManager:
+    """
+    Central registry for asset paths.
+
+    All returned paths go through ``resource_path()`` so they work both when
+    running from source and when frozen into a PyInstaller .exe.
+
+    Directory layout expected under the project / bundle root:
+        assets/
+          icons/   – .ico files
+          images/  – .png / .jpg screenshots and textures
+          sounds/
+            sfx/   – short sound effects (.wav / .ogg)
+            music/ – background music tracks (.ogg / .mp3)
+
+    Usage::
+
+        from arena_shooter.config import assets
+
+        icon   = assets.icon("neonarena.ico")
+        image  = assets.image("mainmenu.png")
+        sound  = assets.sfx("shoot.wav")
+        track  = assets.music("theme.ogg")
+    """
+
+    _ICONS  = os.path.join("assets", "icons")
+    _IMAGES = os.path.join("assets", "images")
+    _SFX    = os.path.join("assets", "sounds", "sfx")
+    _MUSIC  = os.path.join("assets", "sounds", "music")
+
+    def icon(self, name: str) -> str:
+        """Return the absolute path for an icon file (assets/icons/<name>)."""
+        return resource_path(os.path.join(self._ICONS, name))
+
+    def image(self, name: str) -> str:
+        """Return the absolute path for an image file (assets/images/<name>)."""
+        return resource_path(os.path.join(self._IMAGES, name))
+
+    def sfx(self, name: str) -> str:
+        """Return the absolute path for a sound-effect file (assets/sounds/sfx/<name>)."""
+        return resource_path(os.path.join(self._SFX, name))
+
+    def music(self, name: str) -> str:
+        """Return the absolute path for a music file (assets/sounds/music/<name>)."""
+        return resource_path(os.path.join(self._MUSIC, name))
+
+
+# Module-level singleton — import and use directly:
+#   from arena_shooter.config import assets
+#   pygame.mixer.music.load(assets.music("theme.ogg"))
+assets = AssetManager()

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/neonarena.ico" alt="Neon Arena Icon" width="80"/>
+  <img src="assets/icons/neonarena.ico" alt="Neon Arena Icon" width="80"/>
 </p>
 
 <h1 align="center">⚡ NEON ARENA ⚡</h1>
@@ -28,10 +28,10 @@ Every wave pushes the difficulty higher. Every level-up gives you a choice. How 
 
 ## 📸 Screenshot
 
-![Neon Arena Gameplay](assets/mainmenu.png)
-![Neon Arena Gameplay](assets/gameplay1.jpg)
-![Neon Arena Gameplay](assets/levelup.jpg)
-![Neon Arena Gameplay](assets/end.jpg)
+![Neon Arena Main Menu](assets/images/mainmenu.png)
+![Neon Arena Gameplay](assets/images/gameplay1.jpg)
+![Neon Arena Level Up](assets/images/levelup.jpg)
+![Neon Arena Game Over](assets/images/end.jpg)
 
 ---
 
@@ -134,8 +134,16 @@ Neon-Arena/
 │   └── config.py            # Display & audio config persistence
 ├── settings.json            # User settings (auto-generated)
 ├── assets/
-│   ├── neonarena.ico            # Application icon
-│   └── mainmenu.png             # Main menu background
+│   ├── icons/
+│   │   └── neonarena.ico        # Application icon
+│   ├── images/
+│   │   ├── mainmenu.png         # Main menu screenshot
+│   │   ├── gameplay1.jpg        # Gameplay screenshot
+│   │   ├── levelup.jpg          # Level-up screenshot
+│   │   └── end.jpg              # Game-over screenshot
+│   └── sounds/
+│       ├── sfx/                 # Sound effects (.wav / .ogg)
+│       └── music/               # Background music (.ogg / .mp3)
 ├── NeonArena.spec           # PyInstaller build spec
 └── build_app.py             # Build script for .exe distribution
 ```
