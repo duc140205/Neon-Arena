@@ -21,6 +21,8 @@ What it does:
 import subprocess
 import sys
 import os
+import shutil
+import glob
 
 # ── Configuration ────────────────────────────────────────────────────────────
 APP_NAME = "NeonArena"
@@ -34,8 +36,17 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 # settings.json is placed at the bundle root so resource_path("settings.json") works.
 _ALL_DATA_FILES = [
     (os.path.join(PROJECT_ROOT, "settings.json"), "."),
-    (os.path.join(PROJECT_ROOT, "assets", "icons", "neonarena.ico"), os.path.join("assets", "icons")),
 ]
+
+# Auto-discover every file inside the assets/ tree and preserve the
+# relative directory structure inside the bundle.
+ASSETS_ROOT = os.path.join(PROJECT_ROOT, "assets")
+for _abs_path in glob.glob(os.path.join(ASSETS_ROOT, "**", "*"), recursive=True):
+    if os.path.isfile(_abs_path):
+        # e.g. assets/sounds/sfx/hover.wav  →  dest = assets/sounds/sfx
+        _rel_dir = os.path.relpath(os.path.dirname(_abs_path), PROJECT_ROOT)
+        _ALL_DATA_FILES.append((_abs_path, _rel_dir))
+
 # Only include files that actually exist
 DATA_FILES = []
 for _src, _dest in _ALL_DATA_FILES:
@@ -62,8 +73,32 @@ HIDDEN_IMPORTS = [
 ]
 
 
+def clean_build_artifacts():
+    """Delete stale build/, dist/, and all __pycache__/ trees so PyInstaller
+    always compiles from the latest source files."""
+    print("  Cleaning previous build artifacts...")
+
+    for folder in ("build", "dist"):
+        target = os.path.join(PROJECT_ROOT, folder)
+        if os.path.isdir(target):
+            shutil.rmtree(target)
+            print(f"    Removed: {target}")
+
+    # Remove every __pycache__ directory under the project root
+    for cache_dir in glob.glob(
+        os.path.join(PROJECT_ROOT, "**", "__pycache__"), recursive=True
+    ):
+        if os.path.isdir(cache_dir):
+            shutil.rmtree(cache_dir)
+            print(f"    Removed: {cache_dir}")
+
+    print("  Done.")
+    print()
+
+
 def build():
-    """Construct and execute the PyInstaller command."""
+    """Clean stale artifacts, then construct and execute the PyInstaller command."""
+    clean_build_artifacts()
 
     cmd = [
         sys.executable, "-m", "PyInstaller",

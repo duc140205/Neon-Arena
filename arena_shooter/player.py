@@ -8,7 +8,7 @@ import math
 from .settings import (
     PLAYER_SPEED, PLAYER_SIZE, PLAYER_MAX_HP, PLAYER_FIRE_RATE,
     PLAYER_BULLET_SPEED, PLAYER_BULLET_DAMAGE, PLAYER_BULLET_SIZE,
-    DASH_SPEED, DASH_DURATION, DASH_COOLDOWN, DASH_PARTICLES,
+    DASH_SPEED, DASH_DURATION, DASH_COOLDOWN, DASH_PARTICLES, DASH_DECAY_DURATION,
     NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_ORANGE, NEON_YELLOW, WHITE,
     ARENA_WIDTH, ARENA_HEIGHT,
     BASE_XP_REQUIRED, XP_SCALE_FACTOR,
@@ -52,6 +52,11 @@ class Player(pygame.sprite.Sprite):
         self.is_dashing = False
         self.dash_vx = 0.0
         self.dash_vy = 0.0
+
+        # Post-dash speed decay — velocity bleed after the dash window closes
+        self.dash_decay_vx = 0.0
+        self.dash_decay_vy = 0.0
+        self.dash_decay_timer = 0.0
 
         # Shooting
         self.fire_timer = 0.0
@@ -184,6 +189,10 @@ class Player(pygame.sprite.Sprite):
 
         keys = pygame.key.get_pressed()
 
+        # Resolve mouse world position early — needed for dash direction & aiming
+        mouse_world_x, mouse_world_y = camera.world_pos(*mouse_screen_pos)
+        self.aim_angle = math.atan2(mouse_world_y - self.pos_y, mouse_world_x - self.pos_x)
+
         if self.is_dashing:
             self.dash_timer -= dt
             self.pos_x += self.dash_vx * dt
@@ -214,6 +223,10 @@ class Player(pygame.sprite.Sprite):
                 self.dash_ended_this_frame = True
                 self.dash_end_x = self.pos_x
                 self.dash_end_y = self.pos_y
+                # Kick off momentum decay — carry dash velocity forward briefly
+                self.dash_decay_vx = self.dash_vx
+                self.dash_decay_vy = self.dash_vy
+                self.dash_decay_timer = DASH_DECAY_DURATION
         else:
             dx, dy = 0.0, 0.0
             if keys[pygame.K_w] or keys[pygame.K_UP]:
@@ -233,22 +246,40 @@ class Player(pygame.sprite.Sprite):
             self.pos_x += dx * self.speed * dt
             self.pos_y += dy * self.speed * dt
 
-            if keys[pygame.K_SPACE] and self.dash_cooldown_timer <= 0 and (dx != 0 or dy != 0):
+            # Apply lingering momentum from the previous dash (linear decay to 0)
+            if self.dash_decay_timer > 0:
+                self.dash_decay_timer = max(0.0, self.dash_decay_timer - dt)
+                scale = self.dash_decay_timer / DASH_DECAY_DURATION
+                self.pos_x += self.dash_decay_vx * scale * dt
+                self.pos_y += self.dash_decay_vy * scale * dt
+
+            if keys[pygame.K_SPACE] and self.dash_cooldown_timer <= 0:
+                # Direction: movement keys take priority; fall back to mouse cursor
+                if dx != 0 or dy != 0:
+                    dir_x, dir_y = dx, dy   # already normalised
+                else:
+                    mdx = mouse_world_x - self.pos_x
+                    mdy = mouse_world_y - self.pos_y
+                    dist = math.sqrt(mdx * mdx + mdy * mdy)
+                    if dist > 1e-6:
+                        dir_x, dir_y = mdx / dist, mdy / dist
+                    else:
+                        dir_x = math.cos(self.aim_angle)
+                        dir_y = math.sin(self.aim_angle)
                 self.is_dashing = True
                 self.dash_timer = self.dash_duration
                 self.dash_cooldown_timer = self.dash_cooldown
-                self.dash_vx = dx * self.dash_speed
-                self.dash_vy = dy * self.dash_speed
+                self.dash_vx = dir_x * self.dash_speed
+                self.dash_vy = dir_y * self.dash_speed
+                # Cancel any in-flight decay so old momentum doesn't add to the new dash
+                self.dash_decay_timer = 0.0
                 self.particles.emit_dash(self.pos_x, self.pos_y, NEON_MAGENTA, DASH_PARTICLES)
 
         self.pos_x = max(self.radius, min(ARENA_WIDTH - self.radius, self.pos_x))
         self.pos_y = max(self.radius, min(ARENA_HEIGHT - self.radius, self.pos_y))
         self.rect.centerx = int(self.pos_x)
         self.rect.centery = int(self.pos_y)
-
-        # Aim at mouse (mouse_screen_pos is already in screen pixels)
-        mouse_world_x, mouse_world_y = camera.world_pos(*mouse_screen_pos)
-        self.aim_angle = math.atan2(mouse_world_y - self.pos_y, mouse_world_x - self.pos_x)
+        # (aim_angle already computed above before the dash/move block)
 
     def try_shoot(self, bullet_group):
         # Only read mouse buttons when the OS cursor is inside our window.

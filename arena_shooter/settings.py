@@ -87,6 +87,7 @@ DASH_SPEED = 900
 DASH_DURATION = 0.15        # seconds
 DASH_COOLDOWN = 1.0         # seconds
 DASH_PARTICLES = 15
+DASH_DECAY_DURATION = 0.25  # seconds of lingering momentum after dash ends
 
 # Dash upgrade constants
 GHOST_TRAIL_DAMAGE = 15           # damage per tick from ghost trail
