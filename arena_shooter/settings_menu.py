@@ -10,7 +10,11 @@ from .settings import (
     NEON_CYAN, NEON_MAGENTA, NEON_PINK, NEON_YELLOW, NEON_GREEN,
     WHITE, GRAY, DARK_GRAY, DARK_BG,
 )
-from .config import RESOLUTION_OPTIONS, SCREEN_MODE_OPTIONS, FPS_OPTIONS
+from .config import RESOLUTION_OPTIONS, SCREEN_MODE_OPTIONS, FPS_OPTIONS, VOLUME_OPTIONS
+
+# Must match Game._BGM_MASTER_SCALE in game.py so the live preview sounds
+# identical to the in-game volume.
+_BGM_MASTER_SCALE = 0.4
 
 
 class SettingsMenu:
@@ -51,6 +55,18 @@ class SettingsMenu:
                 "key": "vsync",
             },
             {"type": "separator"},
+            {"type": "heading", "label": "AUDIO"},
+            {
+                "type": "option",
+                "label": "Music Volume",
+                "key": "music_volume",
+            },
+            {
+                "type": "option",
+                "label": "SFX Volume",
+                "key": "sfx_volume",
+            },
+            {"type": "separator"},
             {"type": "button", "label": "Apply & Save", "action": "apply"},
             {"type": "button", "label": "Back", "action": "back"},
         ]
@@ -64,11 +80,16 @@ class SettingsMenu:
         self.temp_screen_mode_idx = 0
         self.temp_fps_idx = 1
         self.temp_vsync = False
+        self.temp_music_vol_idx = 7   # default: 0.7
+        self.temp_sfx_vol_idx   = 7   # default: 0.7
 
         # Animation
         self.anim_time = 0.0
         self.flash_timer = 0.0
         self.flash_message = ""
+        # Maps item-index → x pixel that divides the < arrow from the > arrow.
+        # Populated during draw; used by the mouse click handler.
+        self._arrow_split_x: dict = {}
 
     def _create_fonts(self, sc):
         """Create fonts scaled for current resolution."""
@@ -90,10 +111,12 @@ class SettingsMenu:
 
     def open(self, config):
         """Initialize temp values from current config."""
-        self.temp_resolution_idx = config.resolution_index
+        self.temp_resolution_idx  = config.resolution_index
         self.temp_screen_mode_idx = config.screen_mode_index
-        self.temp_fps_idx = config.fps_index
-        self.temp_vsync = config.vsync
+        self.temp_fps_idx         = config.fps_index
+        self.temp_vsync           = config.vsync
+        self.temp_music_vol_idx   = config.music_volume_index
+        self.temp_sfx_vol_idx     = config.sfx_volume_index
         self.selected_index = 1
         self.flash_timer = 0.0
 
@@ -116,6 +139,10 @@ class SettingsMenu:
             return str(FPS_OPTIONS[self.temp_fps_idx])
         elif key == "vsync":
             return "ON" if self.temp_vsync else "OFF"
+        elif key == "music_volume":
+            return f"{int(VOLUME_OPTIONS[self.temp_music_vol_idx] * 100)}%"
+        elif key == "sfx_volume":
+            return f"{int(VOLUME_OPTIONS[self.temp_sfx_vol_idx] * 100)}%"
         return ""
 
     def _cycle_value(self, key, direction):
@@ -134,6 +161,22 @@ class SettingsMenu:
             )
         elif key == "vsync":
             self.temp_vsync = not self.temp_vsync
+        elif key == "music_volume":
+            self.temp_music_vol_idx = (
+                (self.temp_music_vol_idx + direction) % len(VOLUME_OPTIONS)
+            )
+            # Live preview: update BGM volume immediately so the user can
+            # hear the change before clicking "Apply & Save".
+            try:
+                pygame.mixer.music.set_volume(
+                    VOLUME_OPTIONS[self.temp_music_vol_idx] * _BGM_MASTER_SCALE
+                )
+            except Exception:
+                pass
+        elif key == "sfx_volume":
+            self.temp_sfx_vol_idx = (
+                (self.temp_sfx_vol_idx + direction) % len(VOLUME_OPTIONS)
+            )
 
     def handle_event(self, event, config):
         """
@@ -147,6 +190,7 @@ class SettingsMenu:
 
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
+                self._restore_music_volume(config)
                 return "back"
 
             elif event.key in (pygame.K_UP, pygame.K_w):
@@ -183,6 +227,7 @@ class SettingsMenu:
                     if item["action"] == "apply":
                         return self._apply_settings(config)
                     elif item["action"] == "back":
+                        self._restore_music_volume(config)
                         return "back"
                 elif item["type"] == "option":
                     # Enter on option cycles right
@@ -206,9 +251,10 @@ class SettingsMenu:
                     if rect.collidepoint(mouse_pos):
                         item = self.items[idx]
                         if item["type"] == "option":
-                            # Check if clicked on left or right arrow area
-                            mid_x = rect.centerx
-                            if mouse_pos[0] < mid_x:
+                            # Use the stored arrow split so left/right clicks
+                            # map correctly regardless of label width.
+                            split_x = self._arrow_split_x.get(idx, rect.centerx)
+                            if mouse_pos[0] < split_x:
                                 self._cycle_value(item["key"], -1)
                             else:
                                 self._cycle_value(item["key"], +1)
@@ -216,6 +262,7 @@ class SettingsMenu:
                             if item["action"] == "apply":
                                 return self._apply_settings(config)
                             elif item["action"] == "back":
+                                self._restore_music_volume(config)
                                 return "back"
                         break
 
@@ -223,14 +270,24 @@ class SettingsMenu:
 
     def _apply_settings(self, config):
         """Apply temp values to config, save, and return 'apply'."""
-        config.resolution = list(RESOLUTION_OPTIONS[self.temp_resolution_idx])
-        config.screen_mode = SCREEN_MODE_OPTIONS[self.temp_screen_mode_idx]
-        config.fps = FPS_OPTIONS[self.temp_fps_idx]
-        config.vsync = self.temp_vsync
+        config.resolution    = list(RESOLUTION_OPTIONS[self.temp_resolution_idx])
+        config.screen_mode   = SCREEN_MODE_OPTIONS[self.temp_screen_mode_idx]
+        config.fps           = FPS_OPTIONS[self.temp_fps_idx]
+        config.vsync         = self.temp_vsync
+        config.music_volume  = VOLUME_OPTIONS[self.temp_music_vol_idx]
+        config.sfx_volume    = VOLUME_OPTIONS[self.temp_sfx_vol_idx]
         config.save()
         self.flash_message = "Settings saved!"
         self.flash_timer = 1.5
         return "apply"
+
+    def _restore_music_volume(self, config):
+        """Restore BGM to the persisted config volume when the user cancels
+        without saving (undoes any live preview changes)."""
+        try:
+            pygame.mixer.music.set_volume(config.music_volume * _BGM_MASTER_SCALE)
+        except Exception:
+            pass
 
     def draw(self, surface, time):
         """Draw the full settings menu at native resolution."""
@@ -278,42 +335,42 @@ class SettingsMenu:
 
         # ── Items ──
         self._item_rects = []
-        current_y = si(130)
+        current_y = si(110)          # tighter top margin to fit all items
         item_width = si(500)
         item_x = (W - item_width) // 2
 
         for i, item in enumerate(self.items):
             if item["type"] == "heading":
-                current_y += si(10)
+                current_y += si(6)
                 self._draw_heading(surface, item["label"], item_x, current_y, item_width)
-                current_y += si(38)
+                current_y += si(28)  # was 38
 
             elif item["type"] == "separator":
-                current_y += si(8)
+                current_y += si(4)   # was 8
                 sep_surf = pygame.Surface((item_width, 1), pygame.SRCALPHA)
                 sep_surf.fill((*NEON_CYAN, 30))
                 surface.blit(sep_surf, (item_x, current_y))
-                current_y += si(12)
+                current_y += si(8)   # was 12
 
             elif item["type"] == "option":
-                rect = pygame.Rect(item_x, current_y, item_width, si(44))
+                rect = pygame.Rect(item_x, current_y, item_width, si(40))  # was 44
                 self._item_rects.append((i, rect))
                 is_selected = (i == self.selected_index)
                 value_text = self._get_value_text(item["key"])
                 self._draw_option_row(surface, item["label"], value_text,
-                                      rect, is_selected, time)
-                current_y += si(52)
+                                      rect, is_selected, time, item_idx=i)
+                current_y += si(44)  # was 52
 
             elif item["type"] == "button":
                 btn_inset = si(100)
                 rect = pygame.Rect(item_x + btn_inset, current_y,
-                                   item_width - btn_inset * 2, si(44))
+                                   item_width - btn_inset * 2, si(40))  # was 44
                 self._item_rects.append((i, rect))
                 is_selected = (i == self.selected_index)
                 is_apply = (item["action"] == "apply")
                 self._draw_button(surface, item["label"], rect, is_selected,
                                   is_apply, time)
-                current_y += si(56)
+                current_y += si(46)  # was 56
 
         # ── Hints ──
         hints_y = H - si(45)
@@ -346,7 +403,7 @@ class SettingsMenu:
         text = self.font_heading.render(label, True, NEON_MAGENTA)
         surface.blit(text, (x + 14, y + 2))
 
-    def _draw_option_row(self, surface, label, value, rect, selected, time):
+    def _draw_option_row(self, surface, label, value, rect, selected, time, item_idx=None):
         """Draw a single option row with label, value, and arrows."""
         # Background
         if selected:
@@ -381,6 +438,13 @@ class SettingsMenu:
                          value_surf.get_width() + 10 +
                          right_arrow.get_width())
         vx = rect.right - value_total_w - 16
+
+        # Store the split x so the mouse handler can tell < from >.
+        # Split is the midpoint between the two arrows: right edge of < plus
+        # half the gap + value width + half the gap before >.
+        # Anything to the LEFT of split_x → decrease; RIGHT → increase.
+        if item_idx is not None:
+            self._arrow_split_x[item_idx] = vx + left_arrow.get_width() + 5 + value_surf.get_width() // 2
 
         cy = rect.centery
         surface.blit(left_arrow, (vx, cy - left_arrow.get_height() // 2))

@@ -39,6 +39,9 @@ class UI:
         self.menu_settings_rect = pygame.Rect(0, 0, 0, 0)
         self.menu_quit_rect = pygame.Rect(0, 0, 0, 0)
 
+        # Pause menu rects (set during draw_pause_menu)
+        self.pause_settings_rect: pygame.Rect | None = None
+
     def _create_fonts(self):
         """Create fonts scaled to the current resolution."""
         s = self.scale
@@ -455,15 +458,32 @@ class UI:
     def draw_pause_menu(self, surface):
         W, H = self.W, self.H
         overlay = pygame.Surface((W, H), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 150))
+        overlay.fill((0, 0, 0, 160))
         surface.blit(overlay, (0, 0))
 
+        # Title
         title = self.font_large.render("PAUSED", True, NEON_CYAN)
-        title_rect = title.get_rect(center=(W // 2, H // 2 - self._s(30)))
+        title_rect = title.get_rect(center=(W // 2, H // 2 - self._s(70)))
         surface.blit(title, title_rect)
 
-        hint = self.font_small.render("[ESC] Resume  |  [R] Restart  |  [Q] Quit", True, GRAY)
-        hint_rect = hint.get_rect(center=(W // 2, H // 2 + self._s(30)))
+        # Settings button
+        btn_w = self._s(240)
+        btn_h = self._s(44)
+        settings_rect = pygame.Rect(
+            W // 2 - btn_w // 2,
+            H // 2 - btn_h // 2,
+            btn_w, btn_h,
+        )
+        pygame.draw.rect(surface, NEON_MAGENTA, settings_rect, 2, border_radius=6)
+        settings_lbl = self.font_small.render("[S]  Settings", True, NEON_MAGENTA)
+        surface.blit(settings_lbl, settings_lbl.get_rect(center=settings_rect.center))
+        self.pause_settings_rect = settings_rect
+
+        # Hint line
+        hint = self.font_small.render(
+            "[ESC] Resume  |  [R] Restart  |  [Q] Quit to Menu", True, GRAY
+        )
+        hint_rect = hint.get_rect(center=(W // 2, H // 2 + self._s(60)))
         surface.blit(hint, hint_rect)
 
     def _draw_rounded_bar(self, surface, x, y, w, h, color):

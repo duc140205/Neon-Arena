@@ -215,34 +215,85 @@ class Game:
     # ── Sound System ─────────────────────────────────────
 
     def _init_sounds(self):
+        """Load SFX from asset files when available; fall back to procedurally
+        generated tones so the game always has audio, even without .wav files."""
         self.sounds = {}
+        # Reference volumes (0–1) before sfx_volume multiplier is applied.
+        # Tune these to balance individual effects against each other.
+        self._sfx_base_volumes = {
+            "shoot":   0.30,
+            "explode": 0.40,
+            "levelup": 0.45,
+        }
+        # Map: sound name → filename inside assets/sounds/sfx/
+        _sfx_files = {
+            "shoot":   "shoot.wav",
+            "explode": "explode.wav",
+            "levelup": "levelup.wav",
+        }
+        for name, filename in _sfx_files.items():
+            loaded = False
+            try:
+                path = assets.sfx(filename)
+                if os.path.exists(path):
+                    self.sounds[name] = pygame.mixer.Sound(path)
+                    loaded = True
+            except Exception:
+                pass
+            if not loaded:
+                self._load_generated_sfx(name)
+        self._apply_sfx_volumes()
+        self._start_bgm()
+
+    def _load_generated_sfx(self, name):
+        """Generate a synthetic fallback sound when no .wav file is available."""
         try:
-            sample_rate = 44100
-            shoot_arr = pygame.sndarray.make_sound(
-                self._generate_beep(440, 0.05, sample_rate)
-            )
-            self.sounds["shoot"] = shoot_arr
-            self.sounds["shoot"].set_volume(0.15)
+            arr = None
+            if name == "shoot":
+                arr = self._generate_beep(440, 0.05)
+            elif name == "explode":
+                arr = self._generate_noise(0.1)
+            elif name == "levelup":
+                arr = self._generate_beep(880, 0.15)
+            if arr is not None:
+                self.sounds[name] = pygame.sndarray.make_sound(arr)
         except Exception:
             pass
+
+    def _start_bgm(self):
+        """Load and loop the background music track."""
+        # _BGM_MASTER_SCALE caps the maximum mixer volume so the track never
+        # overpowers SFX even at the 100% slider position.  Raise/lower this
+        # single constant to re-tune the overall BGM loudness.
+        self._BGM_MASTER_SCALE = 0.4
         try:
-            sample_rate = 44100
-            explode_arr = pygame.sndarray.make_sound(
-                self._generate_noise(0.1, sample_rate)
-            )
-            self.sounds["explode"] = explode_arr
-            self.sounds["explode"].set_volume(0.2)
+            bgm_path = assets.music("Sketchbook 2025-12-11_VERSE.ogg")
+            if os.path.exists(bgm_path):
+                pygame.mixer.music.load(bgm_path)
+                pygame.mixer.music.set_volume(self.config.music_volume * self._BGM_MASTER_SCALE)
+                pygame.mixer.music.play(-1)   # -1 = loop forever
         except Exception:
             pass
+
+    def _apply_sfx_volumes(self):
+        """Scale every loaded SFX Sound by config.sfx_volume."""
+        for name, base in self._sfx_base_volumes.items():
+            if name in self.sounds:
+                try:
+                    self.sounds[name].set_volume(
+                        max(0.0, min(1.0, base * self.config.sfx_volume))
+                    )
+                except Exception:
+                    pass
+
+    def _apply_volumes(self):
+        """Re-apply all audio volumes from config (call after settings change)."""
         try:
-            sample_rate = 44100
-            levelup_arr = pygame.sndarray.make_sound(
-                self._generate_beep(880, 0.15, sample_rate)
-            )
-            self.sounds["levelup"] = levelup_arr
-            self.sounds["levelup"].set_volume(0.25)
+            scale = getattr(self, '_BGM_MASTER_SCALE', 0.4)
+            pygame.mixer.music.set_volume(self.config.music_volume * scale)
         except Exception:
             pass
+        self._apply_sfx_volumes()
 
     def _generate_beep(self, freq, duration, sample_rate=44100):
         import numpy as np
@@ -429,6 +480,7 @@ class Game:
             elif result == "apply":
                 self._apply_display_mode()
                 self._on_resolution_changed()
+                self._apply_volumes()         # re-apply volumes after display change
                 pygame.event.clear()  # discard stale resize/activate events
             return
 
@@ -444,6 +496,8 @@ class Game:
             elif self.state == GameState.PAUSED:
                 if event.key == pygame.K_ESCAPE:
                     self.state = GameState.PLAYING
+                elif event.key == pygame.K_s:
+                    self._open_settings()
                 elif event.key == pygame.K_r:
                     self.new_game()
                 elif event.key == pygame.K_q:
@@ -479,6 +533,12 @@ class Game:
                             self._generate_upgrade_options()
                         else:
                             self.state = GameState.PLAYING
+
+            elif self.state == GameState.PAUSED:
+                if event.button == 1:
+                    if (self.ui.pause_settings_rect is not None and
+                            self.ui.pause_settings_rect.collidepoint(event.pos)):
+                        self._open_settings()
 
     def _to_logical(self, pos):
         """Convert native screen pos to logical 1280x720 coordinates."""

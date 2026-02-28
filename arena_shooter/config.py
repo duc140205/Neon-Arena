@@ -62,6 +62,8 @@ RESOLUTION_OPTIONS = [
 SCREEN_MODE_OPTIONS = ["windowed", "fullscreen"]
 
 FPS_OPTIONS = [30, 60, 120, 144, 240]
+# Volume slider steps: 0 % → 100 % in 10 % increments.
+VOLUME_OPTIONS = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
 # ── Defaults ─────────────────────────────────────────────
 DEFAULTS = {
@@ -72,6 +74,10 @@ DEFAULTS = {
     "performance": {
         "fps": 60,
         "vsync": False,
+    },
+    "audio": {
+        "music_volume": 0.7,
+        "sfx_volume": 0.7,
     },
 }
 
@@ -96,6 +102,10 @@ class Config:
         # Performance
         self.fps = DEFAULTS["performance"]["fps"]
         self.vsync = DEFAULTS["performance"]["vsync"]
+
+        # Audio
+        self.music_volume: float = DEFAULTS["audio"]["music_volume"]
+        self.sfx_volume: float   = DEFAULTS["audio"]["sfx_volume"]
 
         # Load saved settings (if any)
         self.load()
@@ -132,6 +142,13 @@ class Config:
                     self.fps = DEFAULTS["performance"]["fps"]
                 self.vsync = bool(perf.get("vsync", DEFAULTS["performance"]["vsync"]))
 
+                # Audio
+                audio = data.get("audio", {})
+                mv = float(audio.get("music_volume", DEFAULTS["audio"]["music_volume"]))
+                sv = float(audio.get("sfx_volume",   DEFAULTS["audio"]["sfx_volume"]))
+                self.music_volume = max(0.0, min(1.0, mv))
+                self.sfx_volume   = max(0.0, min(1.0, sv))
+
         except (json.JSONDecodeError, IOError, KeyError):
             # If anything goes wrong, stick with defaults
             pass
@@ -146,6 +163,10 @@ class Config:
             "performance": {
                 "fps": self.fps,
                 "vsync": self.vsync,
+            },
+            "audio": {
+                "music_volume": self.music_volume,
+                "sfx_volume":   self.sfx_volume,
             },
         }
         try:
@@ -205,6 +226,18 @@ class Config:
         if self.fps in FPS_OPTIONS:
             return FPS_OPTIONS.index(self.fps)
         return 1  # default to 60
+
+    @property
+    def music_volume_index(self) -> int:
+        """Closest index into VOLUME_OPTIONS for the current music_volume."""
+        return min(range(len(VOLUME_OPTIONS)),
+                   key=lambda i: abs(VOLUME_OPTIONS[i] - self.music_volume))
+
+    @property
+    def sfx_volume_index(self) -> int:
+        """Closest index into VOLUME_OPTIONS for the current sfx_volume."""
+        return min(range(len(VOLUME_OPTIONS)),
+                   key=lambda i: abs(VOLUME_OPTIONS[i] - self.sfx_volume))
 
     def resolution_label(self):
         return f"{self.resolution[0]}x{self.resolution[1]}"
