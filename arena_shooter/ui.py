@@ -585,7 +585,7 @@ class UI:
 
         label_color = NEON_PURPLE if ratio >= 1.0 else GRAY
         ult_label = self.font_tiny.render(
-            "ULT [Q] READY!" if ratio >= 1.0 else "ULT [Q]",
+            "ULT [F] READY!" if ratio >= 1.0 else "ULT [F]",
             True, label_color)
         surface.blit(ult_label, (ult_x, ult_y - s(16)))
 

@@ -547,7 +547,7 @@ class Game:
             elif self.state == GameState.PLAYING:
                 if event.key == pygame.K_ESCAPE:
                     self.state = GameState.PAUSED
-                elif event.key == pygame.K_q:
+                elif event.key == pygame.K_f:
                     # Activate ultimate ability
                     if self.player and self.player.try_activate_ultimate():
                         self._play_sound("explode")
@@ -1016,7 +1016,7 @@ class Game:
             self.trial_notification_timer = 4.0
             self.trial_notification_text = (
                 f"BOSS ARTIFACT: {artifact_type.upper()} — "
-                f"Press [Q] near enemies, then complete the trial!"
+                f"Press [F] near enemies, then complete the trial!"
             )
             # Start the trial immediately
             self._start_trial(artifact_type)
