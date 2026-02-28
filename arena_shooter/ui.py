@@ -42,6 +42,11 @@ class UI:
         # Pause menu rects (set during draw_pause_menu)
         self.pause_settings_rect: pygame.Rect | None = None
 
+        # Currently-hovered interactive element id (set each draw frame).
+        # game.py reads this after each draw_main_menu / draw_upgrade_screen
+        # call to decide when to fire hover.wav.
+        self.hovered_id: str | None = None
+
     def _create_fonts(self):
         """Create fonts scaled to the current resolution."""
         s = self.scale
@@ -337,6 +342,14 @@ class UI:
         instr_rect = instr.get_rect(center=(W // 2, card_y + card_h + s(40)))
         surface.blit(instr, instr_rect)
 
+        # Expose which card the cursor is over for hover-sound purposes.
+        hovered_upgrade = None
+        for card_rect, key in self.upgrade_rects:
+            if card_rect.collidepoint(mouse_pos):
+                hovered_upgrade = f"upgrade_{key}"
+                break
+        self.hovered_id = hovered_upgrade
+
     def draw_game_over(self, surface, player, wave_info):
         W, H = self.W, self.H
         s = self._s
@@ -419,6 +432,16 @@ class UI:
         self._draw_menu_button(surface, "QUIT", quit_rect,
                                quit_rect.collidepoint(mouse_pos), NEON_PINK, time)
         self.menu_quit_rect = quit_rect
+
+        # Track which button the cursor is over for hover-sound purposes.
+        if start_rect.collidepoint(mouse_pos):
+            self.hovered_id = "menu_start"
+        elif settings_rect.collidepoint(mouse_pos):
+            self.hovered_id = "menu_settings"
+        elif quit_rect.collidepoint(mouse_pos):
+            self.hovered_id = "menu_quit"
+        else:
+            self.hovered_id = None
 
         # Controls
         controls = self.font_tiny.render(
