@@ -108,6 +108,11 @@ class Game:
 
         self._pre_settings_state = GameState.MENU
 
+        # Hover-sound tracking — fire hover.wav once when cursor enters a
+        # new interactive element (menu button or upgrade card).
+        self._last_hovered_id: str | None = None   # last element that triggered hover sound
+        self._prev_draw_state: str | None = None   # detect state transitions
+
         # Sound
         self._init_sounds()
 
@@ -224,12 +229,14 @@ class Game:
             "shoot":   0.30,
             "explode": 0.40,
             "levelup": 0.45,
+            "hover":   0.25,
         }
         # Map: sound name → filename inside assets/sounds/sfx/
         _sfx_files = {
             "shoot":   "shoot.wav",
             "explode": "explode.wav",
             "levelup": "levelup.wav",
+            "hover":   "hover.wav",
         }
         for name, filename in _sfx_files.items():
             loaded = False
@@ -317,6 +324,17 @@ class Game:
                 self.sounds[name].play()
             except Exception:
                 pass
+
+    def _check_hover_sound(self):
+        """Fire hover.wav exactly once when the mouse enters a new interactive
+        element.  Compare UI's freshly-computed hovered_id against the last
+        frame's value; play only on a change *to* a non-None id.
+        Re-entry into a previously-hovered element after a state change also
+        triggers the sound because _prev_draw_state resets _last_hovered_id."""
+        current = self.ui.hovered_id
+        if current is not None and current != self._last_hovered_id:
+            self._play_sound("hover")
+        self._last_hovered_id = current
 
     # ── Background ───────────────────────────────────────
 
@@ -843,8 +861,15 @@ class Game:
     # ── Drawing ──────────────────────────────────────────
 
     def _draw(self, surface):
+        # Reset hover tracking on every state transition so re-entering a
+        # menu state always fires the hover sound for the first element entered.
+        if self.state != self._prev_draw_state:
+            self._last_hovered_id = None
+        self._prev_draw_state = self.state
+
         if self.state == GameState.MENU:
             self.ui.draw_main_menu(surface, self.time)
+            self._check_hover_sound()
             return
 
         if self.state == GameState.SETTINGS:
@@ -924,5 +949,6 @@ class Game:
                 self.ui.draw_pause_menu(surface)
             elif self.state == GameState.UPGRADE:
                 self.ui.draw_upgrade_screen(surface, self.upgrade_options, self.player)
+                self._check_hover_sound()
             elif self.state == GameState.GAME_OVER:
                 self.ui.draw_game_over(surface, self.player, wave_info)
